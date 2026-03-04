@@ -7,10 +7,10 @@
     "light": "#545454",
     "dark": "#94cb04"
   },
-  "favicon": "/favicon.png",
+  "favicon": "https://media.brand.dev/288cc7c4-5cef-4376-950b-bdf0083eedae.png",
   "logo": {
-    "light": "/logo-light.png",
-    "dark": "/logo-light.png"
+    "light": "https://media.brand.dev/288cc7c4-5cef-4376-950b-bdf0083eedae.png",
+    "dark": "https://media.brand.dev/288cc7c4-5cef-4376-950b-bdf0083eedae.png"
   },
   "navbar": {
     "primary": {
