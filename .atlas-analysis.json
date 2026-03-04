@@ -1,0 +1,126 @@
+{
+  "projectType": "framework",
+  "projectName": "Go Template",
+  "projectDescription": "An opinionated Go project template for service workloads with batteries included: TLS-fingerprinted HTTP clients, exponential backoff, bounded concurrency, file-backed state, PostgreSQL, and structured logging.",
+  "theme": "aspen",
+  "primaryColor": "#94cb04",
+  "lightColor": "#545454",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "setup"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/project-structure",
+              "concepts/configuration"
+            ]
+          },
+          {
+            "group": "Packages",
+            "pages": [
+              "packages/client",
+              "packages/retry",
+              "packages/worker",
+              "packages/state",
+              "packages/db",
+              "packages/env",
+              "packages/log",
+              "packages/cycle",
+              "packages/ptr"
+            ]
+          },
+          {
+            "group": "Development",
+            "pages": [
+              "development/local-setup",
+              "development/docker",
+              "development/database",
+              "development/testing"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "HTTP Client",
+            "pages": [
+              "api/client/overview",
+              "api/client/configuration",
+              "api/client/tls-fingerprinting",
+              "api/client/cookies"
+            ]
+          },
+          {
+            "group": "Concurrency",
+            "pages": [
+              "api/retry",
+              "api/worker"
+            ]
+          },
+          {
+            "group": "State & Data",
+            "pages": [
+              "api/state",
+              "api/db"
+            ]
+          },
+          {
+            "group": "Utilities",
+            "pages": [
+              "api/env",
+              "api/log",
+              "api/cycle",
+              "api/ptr"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "TLS-fingerprinted HTTP clients with HTTP/2 support",
+    "Exponential backoff retry with full jitter",
+    "Bounded concurrency primitives via errgroup",
+    "File-backed JSON state persistence with locking",
+    "PostgreSQL integration with pgx and sqlc",
+    "Structured logging with slog and tint",
+    "Docker support with hot reload",
+    "Interactive setup wizard for feature selection",
+    "Environment configuration with validation",
+    "Round-robin file rotation utilities"
+  ],
+  "publicApiSurface": [
+    "client.New() - Create TLS-fingerprinted HTTP client",
+    "client.Client.Do() - Execute HTTP requests with redirect handling",
+    "client.Client.SetCookies() - Manage cookie jar",
+    "retry.Do() - Retry function with exponential backoff",
+    "retry.WithMaxAttempts() - Configure retry attempts",
+    "retry.WithInitialDelay() - Configure initial backoff delay",
+    "worker.Run() - Process items with bounded concurrency",
+    "worker.Map() - Concurrent map with result collection",
+    "state.Open() - Open file-backed state with locking",
+    "state.File.Load() - Load persisted state",
+    "state.File.Save() - Save state to disk",
+    "db.New() - Create PostgreSQL connection pool",
+    "db.DB.InTx() - Execute transaction with rollback",
+    "db.TryAdvisoryLock() - Acquire Postgres advisory lock",
+    "env.Load() - Load and validate environment variables",
+    "log.New() - Create structured logger with tint",
+    "cycle.New() - Create round-robin file rotator",
+    "ptr.To() - Convert value to pointer"
+  ]
+}
