@@ -1,0 +1,426 @@
+---
+title: "ptr"
+description: "Nil-safe pointer dereferencing and comparison utilities"
+---
+
+The `ptr` package provides nil-safe pointer dereferencing and comparison utilities for working with pointer types in Go. It simplifies common pointer operations and eliminates boilerplate nil checks.
+
+## Functions
+
+### To (Deprecated)
+
+```go
+func To[T any](v T) *T
+```
+
+**Deprecated:** Creates a pointer to a value. Use `new(expr)` instead (available in Go 1.26+).
+
+<ParamField path="v" type="T" required>
+  The value to create a pointer to.
+</ParamField>
+
+**Returns:** `*T` - A pointer to the value.
+
+**Example:**
+
+```go
+package main
+
+import "github.com/aarock1234/go-template/pkg/ptr"
+
+// Deprecated: Use new(42) instead (Go 1.26+)
+func oldWay() {
+    num := ptr.To(42)        // *int pointing to 42
+    str := ptr.To("hello")   // *string pointing to "hello"
+    flag := ptr.To(true)     // *bool pointing to true
+}
+
+// Modern way (Go 1.26+)
+func newWay() {
+    num := new(42)        // *int pointing to 42
+    str := new("hello")   // *string pointing to "hello"
+    flag := new(true)     // *bool pointing to true
+}
+```
+
+### ValueOrZero
+
+```go
+func ValueOrZero[T any](p *T) T
+```
+
+Returns the value of the pointer, or the zero value of type T if the pointer is nil. This is useful for safely dereferencing pointers without explicit nil checks.
+
+<ParamField path="p" type="*T" required>
+  The pointer to dereference. Can be nil.
+</ParamField>
+
+**Returns:** `T` - The dereferenced value, or zero value if pointer is nil.
+
+**Zero Values by Type:**
+- Numeric types: `0`
+- Strings: `""`
+- Booleans: `false`
+- Pointers: `nil`
+- Slices, maps, channels: `nil`
+- Structs: All fields set to their zero values
+
+**Example:**
+
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/aarock1234/go-template/pkg/ptr"
+)
+
+func main() {
+    // With non-nil pointer
+    num := 42
+    result := ptr.ValueOrZero(&num)
+    fmt.Println(result) // Output: 42
+
+    // With nil pointer
+    var nilNum *int
+    result = ptr.ValueOrZero(nilNum)
+    fmt.Println(result) // Output: 0
+
+    // With string
+    str := "hello"
+    strResult := ptr.ValueOrZero(&str)
+    fmt.Println(strResult) // Output: hello
+
+    var nilStr *string
+    strResult = ptr.ValueOrZero(nilStr)
+    fmt.Println(strResult) // Output: (empty string)
+}
+```
+
+**Common Use Cases:**
+
+```go
+// API response with optional fields
+type UserResponse struct {
+    Name  string
+    Email *string // optional
+    Age   *int    // optional
+}
+
+func displayUser(user UserResponse) {
+    email := ptr.ValueOrZero(user.Email)  // "" if nil
+    age := ptr.ValueOrZero(user.Age)      // 0 if nil
+
+    fmt.Printf("Name: %s\n", user.Name)
+    fmt.Printf("Email: %s\n", email)
+    fmt.Printf("Age: %d\n", age)
+}
+```
+
+### ValueOr
+
+```go
+func ValueOr[T any](p *T, fallback T) T
+```
+
+Returns the value of the pointer, or the provided fallback value if the pointer is nil. This allows you to specify a custom default value instead of the type's zero value.
+
+<ParamField path="p" type="*T" required>
+  The pointer to dereference. Can be nil.
+</ParamField>
+
+<ParamField path="fallback" type="T" required>
+  The value to return if the pointer is nil.
+</ParamField>
+
+**Returns:** `T` - The dereferenced value, or fallback if pointer is nil.
+
+**Example:**
+
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/aarock1234/go-template/pkg/ptr"
+)
+
+func main() {
+    // With non-nil pointer
+    port := 8080
+    result := ptr.ValueOr(&port, 3000)
+    fmt.Println(result) // Output: 8080
+
+    // With nil pointer, uses fallback
+    var nilPort *int
+    result = ptr.ValueOr(nilPort, 3000)
+    fmt.Println(result) // Output: 3000
+
+    // String example
+    name := "Alice"
+    nameResult := ptr.ValueOr(&name, "Guest")
+    fmt.Println(nameResult) // Output: Alice
+
+    var nilName *string
+    nameResult = ptr.ValueOr(nilName, "Guest")
+    fmt.Println(nameResult) // Output: Guest
+}
+```
+
+**Configuration Pattern:**
+
+```go
+type Config struct {
+    Port    *int
+    Host    *string
+    Timeout *time.Duration
+}
+
+func startServer(cfg Config) {
+    port := ptr.ValueOr(cfg.Port, 8080)
+    host := ptr.ValueOr(cfg.Host, "localhost")
+    timeout := ptr.ValueOr(cfg.Timeout, 30*time.Second)
+
+    fmt.Printf("Starting server on %s:%d (timeout: %v)\n", host, port, timeout)
+}
+
+func main() {
+    // Use defaults for all fields
+    startServer(Config{})
+    // Output: Starting server on localhost:8080 (timeout: 30s)
+
+    // Override some fields
+    customPort := 9000
+    startServer(Config{Port: &customPort})
+    // Output: Starting server on localhost:9000 (timeout: 30s)
+}
+```
+
+### Equal
+
+```go
+func Equal[T comparable](a, b *T) bool
+```
+
+Reports whether two pointers point to equal values. Returns `true` if both pointers are nil, and `false` if only one is nil.
+
+<ParamField path="a" type="*T" required>
+  First pointer to compare. Can be nil.
+</ParamField>
+
+<ParamField path="b" type="*T" required>
+  Second pointer to compare. Can be nil.
+</ParamField>
+
+**Returns:** `bool` - `true` if both are nil or both point to equal values, `false` otherwise.
+
+**Comparison Rules:**
+- Both nil: `true`
+- One nil, one non-nil: `false`
+- Both non-nil: `true` if values are equal, `false` otherwise
+
+**Example:**
+
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/aarock1234/go-template/pkg/ptr"
+)
+
+func main() {
+    // Both nil
+    var a, b *int
+    fmt.Println(ptr.Equal(a, b)) // Output: true
+
+    // One nil, one non-nil
+    num := 42
+    fmt.Println(ptr.Equal(a, &num)) // Output: false
+
+    // Both non-nil, equal values
+    x, y := 42, 42
+    fmt.Println(ptr.Equal(&x, &y)) // Output: true
+
+    // Both non-nil, different values
+    z := 99
+    fmt.Println(ptr.Equal(&x, &z)) // Output: false
+
+    // String comparison
+    s1, s2 := "hello", "hello"
+    fmt.Println(ptr.Equal(&s1, &s2)) // Output: true
+
+    s3 := "world"
+    fmt.Println(ptr.Equal(&s1, &s3)) // Output: false
+}
+```
+
+**Testing Pattern:**
+
+```go
+import (
+    "testing"
+    "github.com/aarock1234/go-template/pkg/ptr"
+)
+
+func TestUserUpdate(t *testing.T) {
+    user := User{
+        Name:  "Alice",
+        Email: new("alice@example.com"),
+    }
+
+    updated := updateUser(user)
+
+    if !ptr.Equal(user.Email, updated.Email) {
+        t.Error("Email should not have changed")
+    }
+}
+```
+
+**Optional Field Comparison:**
+
+```go
+type Product struct {
+    Name        string
+    Description *string
+    Price       *float64
+}
+
+func productsEqual(a, b Product) bool {
+    return a.Name == b.Name &&
+           ptr.Equal(a.Description, b.Description) &&
+           ptr.Equal(a.Price, b.Price)
+}
+
+func main() {
+    p1 := Product{
+        Name:        "Widget",
+        Description: new("A useful widget"),
+        Price:       new(19.99),
+    }
+
+    p2 := Product{
+        Name:        "Widget",
+        Description: new("A useful widget"),
+        Price:       new(19.99),
+    }
+
+    fmt.Println(productsEqual(p1, p2)) // Output: true
+}
+```
+
+## Type Constraints
+
+Functions use Go generics with appropriate constraints:
+
+- `To`, `ValueOrZero`, `ValueOr`: Work with `any` type (no constraints)
+- `Equal`: Requires `comparable` constraint (types that support `==` and `!=`)
+
+**Comparable Types:**
+- Numeric types (int, float64, etc.)
+- Strings
+- Booleans
+- Pointers
+- Arrays of comparable types
+- Structs with all comparable fields
+
+**Non-Comparable Types (cannot use with Equal):**
+- Slices
+- Maps
+- Functions
+
+## Usage Patterns
+
+### Optional API Fields
+
+```go
+type CreateUserRequest struct {
+    Name     string  `json:"name"`
+    Email    string  `json:"email"`
+    Age      *int    `json:"age,omitempty"`
+    Bio      *string `json:"bio,omitempty"`
+}
+
+func createUser(req CreateUserRequest) {
+    age := ptr.ValueOr(req.Age, 18)
+    bio := ptr.ValueOr(req.Bio, "No bio provided")
+
+    user := User{
+        Name:  req.Name,
+        Email: req.Email,
+        Age:   age,
+        Bio:   bio,
+    }
+    // Save user...
+}
+```
+
+### Database Null Values
+
+```go
+import "database/sql"
+
+type User struct {
+    ID        int
+    Name      string
+    Email     *string  // nullable
+    DeletedAt *time.Time // nullable
+}
+
+func scanUser(rows *sql.Rows) (User, error) {
+    var user User
+    var email sql.NullString
+    var deletedAt sql.NullTime
+
+    err := rows.Scan(&user.ID, &user.Name, &email, &deletedAt)
+    if err != nil {
+        return User{}, err
+    }
+
+    if email.Valid {
+        user.Email = &email.String
+    }
+    if deletedAt.Valid {
+        user.DeletedAt = &deletedAt.Time
+    }
+
+    return user, nil
+}
+
+func displayUser(user User) {
+    email := ptr.ValueOr(user.Email, "no email")
+    status := "active"
+    if user.DeletedAt != nil {
+        status = "deleted"
+    }
+
+    fmt.Printf("%s (%s) - %s\n", user.Name, email, status)
+}
+```
+
+### Configuration Merging
+
+```go
+type ServerConfig struct {
+    Port    *int
+    Host    *string
+    Debug   *bool
+}
+
+func mergeConfigs(base, override ServerConfig) ServerConfig {
+    return ServerConfig{
+        Port:  firstNonNil(override.Port, base.Port),
+        Host:  firstNonNil(override.Host, base.Host),
+        Debug: firstNonNil(override.Debug, base.Debug),
+    }
+}
+
+func firstNonNil[T any](ptrs ...*T) *T {
+    for _, p := range ptrs {
+        if p != nil {
+            return p
+        }
+    }
+    return nil
+}
+```

@@ -1,0 +1,427 @@
+---
+title: "ptr"
+description: "Nil-safe pointer dereferencing and comparison utilities"
+---
+
+The `ptr` package provides utilities for working with pointers safely, including nil-safe dereferencing, fallback values, and pointer equality comparison.
+
+## Installation
+
+```go
+import "github.com/aarock1234/go-template/pkg/ptr"
+```
+
+## Quick Start
+
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/aarock1234/go-template/pkg/ptr"
+)
+
+func main() {
+    // Safely get value or zero
+    var p *int
+    val := ptr.ValueOrZero(p) // Returns 0, not panic
+    fmt.Println(val) // 0
+    
+    // Get value with fallback
+    name := ptr.ValueOr(nil, "default")
+    fmt.Println(name) // "default"
+    
+    // Compare pointers
+    a := new(42)
+    b := new(42)
+    equal := ptr.Equal(a, b) // true (values are equal)
+    fmt.Println(equal)
+}
+```
+
+## Functions
+
+### To (Deprecated)
+
+Creates a pointer to a value.
+
+```go pkg/ptr/ptr.go:5
+func To[T any](v T) *T
+```
+
+<ParamField path="v" type="T" required>
+  The value to create a pointer to
+</ParamField>
+
+**Note:** This function is deprecated. Use Go 1.26+'s `new(expr)` instead:
+
+```go
+// Old way (deprecated)
+p := ptr.To(42)
+
+// New way (Go 1.26+)
+p := new(42)
+```
+
+**Example (legacy code):**
+
+```go
+type User struct {
+    Name *string
+    Age  *int
+}
+
+user := User{
+    Name: ptr.To("Alice"),
+    Age:  ptr.To(30),
+}
+```
+
+### ValueOrZero
+
+Returns the value of the pointer, or the zero value of the type if the pointer is nil.
+
+```go pkg/ptr/ptr.go:10
+func ValueOrZero[T any](p *T) T
+```
+
+<ParamField path="p" type="*T" required>
+  The pointer to dereference
+</ParamField>
+
+**Returns:**
+- The dereferenced value if `p` is not nil
+- The zero value of type `T` if `p` is nil
+
+**Examples:**
+
+```go
+// With integers
+var num *int
+val := ptr.ValueOrZero(num) // Returns 0
+
+num = new(42)
+val = ptr.ValueOrZero(num) // Returns 42
+
+// With strings
+var str *string
+val := ptr.ValueOrZero(str) // Returns ""
+
+name := new("Alice")
+val = ptr.ValueOrZero(name) // Returns "Alice"
+
+// With booleans
+var flag *bool
+val := ptr.ValueOrZero(flag) // Returns false
+
+// With structs
+type Config struct {
+    Port int
+    Host string
+}
+
+var cfg *Config
+val := ptr.ValueOrZero(cfg) // Returns Config{Port: 0, Host: ""}
+```
+
+### ValueOr
+
+Returns the value of the pointer, or a fallback value if the pointer is nil.
+
+```go pkg/ptr/ptr.go:20
+func ValueOr[T any](p *T, fallback T) T
+```
+
+<ParamField path="p" type="*T" required>
+  The pointer to dereference
+</ParamField>
+
+<ParamField path="fallback" type="T" required>
+  The value to return if the pointer is nil
+</ParamField>
+
+**Returns:**
+- The dereferenced value if `p` is not nil
+- The `fallback` value if `p` is nil
+
+**Examples:**
+
+```go
+// With strings
+var name *string
+val := ptr.ValueOr(name, "Guest") // Returns "Guest"
+
+registered := new("Alice")
+val = ptr.ValueOr(registered, "Guest") // Returns "Alice"
+
+// With integers
+var port *int
+val := ptr.ValueOr(port, 8080) // Returns 8080
+
+custom := new(3000)
+val = ptr.ValueOr(custom, 8080) // Returns 3000
+
+// With slices
+var items *[]string
+val := ptr.ValueOr(items, []string{"default"}) // Returns ["default"]
+```
+
+### Equal
+
+Reports whether two pointers point to equal values.
+
+```go pkg/ptr/ptr.go:30
+func Equal[T comparable](a, b *T) bool
+```
+
+<ParamField path="a" type="*T" required>
+  First pointer to compare
+</ParamField>
+
+<ParamField path="b" type="*T" required>
+  Second pointer to compare
+</ParamField>
+
+**Returns:**
+- `true` if both are nil
+- `false` if only one is nil
+- `true` if both point to equal values
+- `false` if values are not equal
+
+**Examples:**
+
+```go
+// Both nil
+var a, b *int
+ptr.Equal(a, b) // true
+
+// One nil
+a = new(42)
+ptr.Equal(a, b) // false
+
+// Same values
+a = new(42)
+b = new(42)
+ptr.Equal(a, b) // true
+
+// Different values
+a = new(42)
+b = new(100)
+ptr.Equal(a, b) // false
+
+// Same pointer
+a = new(42)
+b = a
+ptr.Equal(a, b) // true
+```
+
+## Usage Examples
+
+### Optional Fields in Structs
+
+```go
+type User struct {
+    ID       int
+    Name     string
+    Email    *string // Optional
+    Age      *int    // Optional
+}
+
+func DisplayUser(user User) {
+    email := ptr.ValueOr(user.Email, "no email provided")
+    age := ptr.ValueOrZero(user.Age) // 0 if not set
+    
+    fmt.Printf("Name: %s\n", user.Name)
+    fmt.Printf("Email: %s\n", email)
+    fmt.Printf("Age: %d\n", age)
+}
+```
+
+### API Responses with Optional Fields
+
+```go
+type APIResponse struct {
+    Status  string
+    Message *string
+    Data    *json.RawMessage
+}
+
+func HandleResponse(resp APIResponse) {
+    // Safely access optional fields
+    message := ptr.ValueOr(resp.Message, "No message")
+    fmt.Println(message)
+    
+    // Check if data exists
+    if ptr.ValueOrZero(resp.Data) != nil {
+        // Process data...
+    }
+}
+```
+
+### Configuration with Defaults
+
+```go
+type Config struct {
+    Host     *string
+    Port     *int
+    Debug    *bool
+    MaxConns *int
+}
+
+func LoadConfig(cfg *Config) {
+    host := ptr.ValueOr(cfg.Host, "localhost")
+    port := ptr.ValueOr(cfg.Port, 8080)
+    debug := ptr.ValueOr(cfg.Debug, false)
+    maxConns := ptr.ValueOr(cfg.MaxConns, 100)
+    
+    fmt.Printf("Server: %s:%d\n", host, port)
+    fmt.Printf("Debug: %v, MaxConns: %d\n", debug, maxConns)
+}
+```
+
+### Comparing Optional Values
+
+```go
+type Update struct {
+    OldValue *string
+    NewValue *string
+}
+
+func HasChanged(update Update) bool {
+    return !ptr.Equal(update.OldValue, update.NewValue)
+}
+
+// Usage
+update := Update{
+    OldValue: new("old"),
+    NewValue: new("new"),
+}
+
+if HasChanged(update) {
+    fmt.Println("Value changed!")
+}
+```
+
+### Database NULL Values
+
+```go
+import "database/sql"
+
+type Product struct {
+    ID          int
+    Name        string
+    Description *string // Can be NULL
+    Price       *float64 // Can be NULL
+}
+
+func ScanProduct(rows *sql.Rows) (*Product, error) {
+    var p Product
+    err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.Price)
+    if err != nil {
+        return nil, err
+    }
+    
+    // Use with defaults
+    desc := ptr.ValueOr(p.Description, "No description")
+    price := ptr.ValueOr(p.Price, 0.0)
+    
+    fmt.Printf("%s: %s ($%.2f)\n", p.Name, desc, price)
+    return &p, nil
+}
+```
+
+### JSON with Optional Fields
+
+```go
+import "encoding/json"
+
+type Request struct {
+    ID      string  `json:"id"`
+    Type    string  `json:"type"`
+    Timeout *int    `json:"timeout,omitempty"`
+    Retry   *bool   `json:"retry,omitempty"`
+}
+
+func ProcessRequest(data []byte) {
+    var req Request
+    json.Unmarshal(data, &req)
+    
+    // Use with sensible defaults
+    timeout := ptr.ValueOr(req.Timeout, 30)
+    retry := ptr.ValueOr(req.Retry, true)
+    
+    fmt.Printf("Processing %s with timeout=%d, retry=%v\n",
+        req.Type, timeout, retry)
+}
+```
+
+## Type Support
+
+All functions use generics and work with any type:
+
+```go
+// Primitives
+ptr.ValueOrZero[int](nil)        // 0
+ptr.ValueOrZero[string](nil)     // ""
+ptr.ValueOrZero[bool](nil)       // false
+ptr.ValueOrZero[float64](nil)    // 0.0
+
+// Slices and maps
+ptr.ValueOrZero[[]string](nil)        // nil (zero value for slice)
+ptr.ValueOrZero[map[string]int](nil)  // nil (zero value for map)
+
+// Structs
+type Point struct { X, Y int }
+ptr.ValueOrZero[Point](nil) // Point{X: 0, Y: 0}
+
+// Interfaces
+ptr.ValueOrZero[error](nil) // nil
+```
+
+## Best Practices
+
+1. **Use ValueOr for user-facing defaults**
+
+```go
+// Good: Clear default for users
+message := ptr.ValueOr(resp.Message, "Operation completed")
+
+// Less clear: Zero value might be confusing
+message := ptr.ValueOrZero(resp.Message) // ""
+```
+
+2. **Use ValueOrZero for internal logic**
+
+```go
+// Good: Check against zero value
+count := ptr.ValueOrZero(result.Count)
+if count == 0 {
+    // Handle empty result
+}
+```
+
+3. **Use Equal for pointer comparison**
+
+```go
+// Good: Safe comparison
+if ptr.Equal(oldValue, newValue) {
+    return // No change
+}
+
+// Avoid: Can panic if nil
+if *oldValue == *newValue { // Panics if either is nil
+    return
+}
+```
+
+4. **Migrate from To() to new()**
+
+With Go 1.26+, replace `ptr.To()` with `new()`:
+
+```go
+// Old
+user := User{Name: ptr.To("Alice")}
+
+// New
+user := User{Name: new("Alice")}
+```

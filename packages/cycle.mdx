@@ -1,0 +1,394 @@
+---
+title: "cycle"
+description: "Thread-safe round-robin file line rotator for cycling through data"
+---
+
+The `cycle` package provides a thread-safe round-robin line rotator backed by a file on disk. It reads lines from a file and serves them in sequential order, automatically wrapping back to the beginning.
+
+## Installation
+
+```go
+import "github.com/aarock1234/go-template/pkg/cycle"
+```
+
+## Use Cases
+
+- Rotating through API keys or tokens
+- Load balancing across multiple endpoints
+- Cycling through proxy servers
+- Distributing work across multiple accounts
+- Testing with multiple data sets
+
+## Quick Start
+
+```go
+package main
+
+import (
+    "log"
+    "github.com/aarock1234/go-template/pkg/cycle"
+)
+
+func main() {
+    // Create a rotator from a file
+    rotator, err := cycle.NewFileRotator("api-keys.txt")
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // Get the next line in rotation
+    apiKey := rotator.Next()
+    println("Using API key:", apiKey)
+    
+    // Get the next key (wraps around)
+    apiKey = rotator.Next()
+    println("Using API key:", apiKey)
+}
+```
+
+## Types
+
+### FileRotator
+
+Reads lines from a file and serves them in round-robin order. All methods are safe for concurrent use.
+
+```go pkg/cycle/cycle.go:18
+type FileRotator struct {
+    // contains filtered or unexported fields
+}
+```
+
+## Functions
+
+### NewFileRotator
+
+Creates a `FileRotator` that reads lines from the specified file path.
+
+```go pkg/cycle/cycle.go:27
+func NewFileRotator(filePath string) (*FileRotator, error)
+```
+
+<ParamField path="filePath" type="string" required>
+  Path to the file containing lines to rotate through. Can be relative or absolute.
+</ParamField>
+
+**Returns:**
+- `*FileRotator` - The initialized rotator
+- `error` - Error if the file cannot be read or doesn't exist
+
+**Behavior:**
+- Resolves the file path to an absolute path
+- Loads all non-empty lines from the file
+- Strips whitespace from each line
+- Ignores empty lines
+- Normalizes line endings (handles both `\n` and `\r\n`)
+
+**Example:**
+
+```go
+// Create rotator from relative path
+rotator, err := cycle.NewFileRotator("keys.txt")
+if err != nil {
+    log.Fatal(err)
+}
+
+// Or absolute path
+rotator, err := cycle.NewFileRotator("/etc/myapp/keys.txt")
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+## Methods
+
+### Next
+
+Returns the next line in round-robin order.
+
+```go pkg/cycle/cycle.go:59
+func (r *FileRotator) Next() string
+```
+
+**Returns:**
+- The next line from the rotation
+- Empty string if the rotator has no lines
+
+**Behavior:**
+- Thread-safe: Can be called from multiple goroutines
+- Automatically wraps to the beginning after reaching the end
+- Logs each returned line at debug level
+
+**Example:**
+
+```go
+rotator, _ := cycle.NewFileRotator("proxies.txt")
+
+for i := 0; i < 10; i++ {
+    proxy := rotator.Next()
+    fmt.Printf("Request %d using proxy: %s\n", i, proxy)
+}
+```
+
+### Count
+
+Returns the number of lines loaded from the file.
+
+```go pkg/cycle/cycle.go:78
+func (r *FileRotator) Count() int
+```
+
+**Example:**
+
+```go
+rotator, _ := cycle.NewFileRotator("endpoints.txt")
+fmt.Printf("Loaded %d endpoints\n", rotator.Count())
+```
+
+### Reset
+
+Moves the rotation index back to the first line.
+
+```go pkg/cycle/cycle.go:86
+func (r *FileRotator) Reset()
+```
+
+**Example:**
+
+```go
+rotator, _ := cycle.NewFileRotator("keys.txt")
+
+// Use some keys
+rotator.Next()
+rotator.Next()
+
+// Start over from the beginning
+rotator.Reset()
+firstKey := rotator.Next() // Returns the first key again
+```
+
+### Reload
+
+Re-reads the file from disk, replacing the current line set.
+
+```go pkg/cycle/cycle.go:53
+func (r *FileRotator) Reload() error
+```
+
+**Returns:**
+- `error` - Error if the file cannot be read
+
+**Behavior:**
+- Reads the file from disk again
+- Replaces all lines with the new content
+- Resets the rotation index to 0
+- Useful for dynamically updating the rotation without restarting
+
+**Example:**
+
+```go
+rotator, _ := cycle.NewFileRotator("keys.txt")
+
+// Use the rotator...
+rotator.Next()
+
+// File is updated externally, reload it
+if err := rotator.Reload(); err != nil {
+    log.Printf("Failed to reload: %v", err)
+}
+```
+
+## File Format
+
+The input file should contain one item per line:
+
+```
+api-key-1
+api-key-2
+api-key-3
+```
+
+**Format rules:**
+- One line per item
+- Empty lines are ignored
+- Leading and trailing whitespace is trimmed
+- Both Unix (`\n`) and Windows (`\r\n`) line endings are supported
+
+## Usage Examples
+
+### API Key Rotation
+
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+    "net/http"
+    "github.com/aarock1234/go-template/pkg/cycle"
+)
+
+var keyRotator *cycle.FileRotator
+
+func init() {
+    var err error
+    keyRotator, err = cycle.NewFileRotator("api-keys.txt")
+    if err != nil {
+        log.Fatal(err)
+    }
+    log.Printf("Loaded %d API keys", keyRotator.Count())
+}
+
+func makeRequest(url string) (*http.Response, error) {
+    req, _ := http.NewRequest("GET", url, nil)
+    req.Header.Set("Authorization", "Bearer "+keyRotator.Next())
+    return http.DefaultClient.Do(req)
+}
+```
+
+### Concurrent Usage
+
+```go
+func main() {
+    rotator, err := cycle.NewFileRotator("servers.txt")
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // Safe to use from multiple goroutines
+    for i := 0; i < 100; i++ {
+        go func(id int) {
+            server := rotator.Next()
+            fmt.Printf("Worker %d using server: %s\n", id, server)
+        }(i)
+    }
+}
+```
+
+### Proxy Rotation
+
+```go
+type ProxyClient struct {
+    rotator *cycle.FileRotator
+}
+
+func NewProxyClient(proxyFile string) (*ProxyClient, error) {
+    rotator, err := cycle.NewFileRotator(proxyFile)
+    if err != nil {
+        return nil, err
+    }
+    return &ProxyClient{rotator: rotator}, nil
+}
+
+func (c *ProxyClient) GetClient() *http.Client {
+    proxyURL := c.rotator.Next()
+    proxy, _ := url.Parse(proxyURL)
+    
+    return &http.Client{
+        Transport: &http.Transport{
+            Proxy: http.ProxyURL(proxy),
+        },
+    }
+}
+```
+
+### Hot Reloading
+
+```go
+import "time"
+
+func main() {
+    rotator, _ := cycle.NewFileRotator("config.txt")
+    
+    // Reload the file every 5 minutes
+    go func() {
+        ticker := time.NewTicker(5 * time.Minute)
+        defer ticker.Stop()
+        
+        for range ticker.C {
+            if err := rotator.Reload(); err != nil {
+                log.Printf("Failed to reload: %v", err)
+            } else {
+                log.Printf("Reloaded %d items", rotator.Count())
+            }
+        }
+    }()
+    
+    // Use the rotator...
+}
+```
+
+## Thread Safety
+
+All methods are safe for concurrent use:
+- `Next()` uses a mutex to ensure sequential rotation
+- `Count()` uses a read lock for efficient concurrent reads
+- `Reset()` and `Reload()` use exclusive locks
+
+```go
+// Safe to call from multiple goroutines
+for i := 0; i < 1000; i++ {
+    go func() {
+        key := rotator.Next()
+        // Use key...
+    }()
+}
+```
+
+## Logging
+
+The package uses structured logging from `pkg/log`:
+
+```
+INF loaded lines from file count=5 file=keys.txt
+DBG returning next line line=api-key-1 index=0 file=keys.txt
+WRN no lines found in file file=empty.txt
+```
+
+Set `LOG_LEVEL=debug` to see each line rotation.
+
+## Error Handling
+
+```go
+rotator, err := cycle.NewFileRotator("missing.txt")
+if err != nil {
+    // Error: "failed to read file /path/to/missing.txt: no such file or directory"
+    log.Fatal(err)
+}
+
+// Reload can also return errors
+if err := rotator.Reload(); err != nil {
+    log.Printf("Reload failed: %v", err)
+}
+```
+
+## Best Practices
+
+1. **Check line count**: Verify that lines were loaded successfully
+
+```go
+rotator, err := cycle.NewFileRotator("keys.txt")
+if err != nil {
+    log.Fatal(err)
+}
+
+if rotator.Count() == 0 {
+    log.Fatal("No keys found in file")
+}
+```
+
+2. **Handle empty returns**: Check if `Next()` returns an empty string
+
+```go
+key := rotator.Next()
+if key == "" {
+    log.Fatal("Rotator has no lines")
+}
+```
+
+3. **Implement hot reloading**: Reload the file periodically for dynamic updates
+
+4. **Use absolute paths in production**: Avoid issues with relative paths
+
+```go
+rotator, err := cycle.NewFileRotator("/etc/myapp/keys.txt")
+```

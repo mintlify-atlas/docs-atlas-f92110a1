@@ -1,0 +1,241 @@
+---
+title: Architecture Overview
+description: Understanding the design philosophy and architecture of the Go Template
+---
+
+The Go Template is an opinionated project starter designed specifically for **scraper, bot, and service workloads**. It combines battle-tested patterns with production-ready infrastructure to help you build reliable, maintainable Go applications.
+
+## Design Philosophy
+
+This template makes deliberate architectural choices to optimize for:
+
+- **Resilience**: Exponential backoff, bounded concurrency, and graceful error handling
+- **Observability**: Structured logging with context injection throughout
+- **State Management**: File-backed persistence and database transactions
+- **HTTP Excellence**: TLS fingerprinting, cookie management, and proxy support
+- **Developer Experience**: Hot reload, type-safe queries, and clear separation of concerns
+
+## Core Architecture
+
+The template follows a layered architecture that separates concerns while maintaining simplicity:
+
+```
+┌─────────────────────────────────────┐
+│   cmd/template (Entry Point)       │
+│   - Signal handling                 │
+│   - Config loading                  │
+│   - Service wiring                  │
+└──────────────┬──────────────────────┘
+               │
+┌──────────────▼──────────────────────┐
+│   pkg/template (Domain Logic)       │
+│   - Business logic                  │
+│   - Request orchestration           │
+└──────────────┬──────────────────────┘
+               │
+       ┌───────┴───────┐
+       │               │
+┌──────▼─────┐  ┌──────▼─────┐
+│ pkg/client │  │  pkg/db    │
+│ HTTP layer │  │ Data layer │
+└────────────┘  └────────────┘
+```
+
+### Entry Point
+
+The application starts in `cmd/template/main.go`, which demonstrates the recommended initialization pattern:
+
+```go cmd/template/main.go
+func main() {
+    ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+    defer stop()
+
+    config, err := env.New()
+    if err != nil {
+        slog.ErrorContext(ctx, "failed to load config", "error", err)
+        os.Exit(1)
+    }
+
+    if err := run(ctx, config); err != nil {
+        if cause := context.Cause(ctx); cause != nil {
+            slog.ErrorContext(ctx, "shutting down", "cause", cause)
+        } else {
+            slog.ErrorContext(ctx, "failed to run", "error", err)
+        }
+        os.Exit(1)
+    }
+}
+```
+
+This pattern ensures:
+- Graceful shutdown on SIGINT/SIGTERM
+- Clear error reporting with context
+- Environment validation before execution
+
+### Domain Layer
+
+The `pkg/template` package demonstrates how to compose HTTP clients and database connections:
+
+```go pkg/template/template.go
+type Template struct {
+    db     *db.DB
+    client *client.Client
+}
+
+func New(db *db.DB, proxy *client.Proxy) (*Template, error) {
+    var opts []client.Option
+    if proxy != nil {
+        opts = append(opts, client.WithProxy(proxy))
+    }
+
+    c, err := client.New(opts...)
+    if err != nil {
+        return nil, err
+    }
+
+    return &Template{
+        db:     db,
+        client: c,
+    }, nil
+}
+```
+
+<Note>
+Replace `pkg/template` with your own domain logic. This is a skeleton service meant to be customized.
+</Note>
+
+## Key Capabilities
+
+### TLS Fingerprinting
+
+The `pkg/client` package provides an HTTP client with browser-accurate TLS and HTTP/2 fingerprinting:
+
+```go
+client, err := client.New(
+    client.WithBrowser(client.BrowserChrome),
+    client.WithPlatform(client.PlatformWindows),
+)
+```
+
+This allows your scrapers to appear as legitimate browser traffic, avoiding basic bot detection.
+
+### Bounded Concurrency
+
+The `pkg/worker` package wraps `errgroup` to provide safe, bounded parallelism:
+
+```go pkg/worker/worker.go
+func Run[T any](ctx context.Context, items []T, concurrency int, 
+    fn func(ctx context.Context, item T) error) error {
+    g, ctx := errgroup.WithContext(ctx)
+    g.SetLimit(concurrency)
+
+    for _, item := range items {
+        g.Go(func() error {
+            return fn(ctx, item)
+        })
+    }
+
+    return g.Wait()
+}
+```
+
+### Retry Logic
+
+The `pkg/retry` package implements exponential backoff with full jitter:
+
+```go
+err := retry.Do(ctx, func(ctx context.Context) error {
+    return doRequest(ctx)
+}, 
+    retry.WithMaxAttempts(5),
+    retry.WithInitialDelay(time.Second),
+)
+```
+
+### State Persistence
+
+The `pkg/state` package provides type-safe, file-backed state with cross-platform locking:
+
+```go
+type AppState struct {
+    LastRun   time.Time
+    ProcessedIDs []string
+}
+
+stateFile, err := state.Open[AppState]("state.json")
+defer stateFile.Close()
+
+current, err := stateFile.Load()
+// Update state
+stateFile.Save(current)
+```
+
+## When to Use This Template
+
+This template is ideal for:
+
+<CardGroup cols={2}>
+  <Card title="Web Scrapers" icon="spider-web">
+    TLS fingerprinting, cookie management, and retry logic built-in
+  </Card>
+  <Card title="API Bots" icon="robot">
+    Structured logging, state persistence, and bounded concurrency
+  </Card>
+  <Card title="Data Collectors" icon="database">
+    PostgreSQL integration with type-safe queries via sqlc
+  </Card>
+  <Card title="Background Services" icon="server">
+    Graceful shutdown, signal handling, and context propagation
+  </Card>
+</CardGroup>
+
+### Not Recommended For
+
+This template may be overkill for:
+- Simple HTTP servers (use `net/http` directly)
+- Serverless functions (too much initialization overhead)
+- CLI tools without network I/O (use `cobra` or `flag` instead)
+
+## Opinionated Choices
+
+### Why These Defaults?
+
+1. **TLS Verification Disabled by Default**: Scrapers often need to bypass SSL verification for proxies or testing. Re-enable in production with `client.WithInsecureSkipVerify(false)`.
+
+2. **Keep-Alives Disabled**: Prevents connection pool exhaustion when scraping many domains. Enable for API clients hitting the same endpoint.
+
+3. **Structured Logging**: `slog` with `tint` provides human-readable development logs that can be switched to JSON in production.
+
+4. **Single Binary**: The `cmd/` directory follows the standard Go project layout, making it easy to add multiple binaries later.
+
+5. **PostgreSQL Over SQLite**: Production scrapers need concurrent writes and better locking. Postgres is opt-in—comment it out if not needed.
+
+## Multi-Stage Docker
+
+The Dockerfile provides three build targets:
+
+```dockerfile
+# Development: Full toolchain with hot reload
+FROM golang:1.26 AS dev
+
+# Builder: Compiles static binary
+FROM dev AS builder
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build
+
+# Production: Minimal Alpine image
+FROM alpine:3.23 AS production
+COPY --from=builder /bin/template /bin/template
+```
+
+This produces a ~15MB production image while keeping development ergonomic.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Project Structure" href="/concepts/project-structure" icon="folder-tree">
+    Understand the directory layout and where to add your code
+  </Card>
+  <Card title="Configuration" href="/concepts/configuration" icon="gear">
+    Learn how to configure environment variables and add new settings
+  </Card>
+</CardGroup>

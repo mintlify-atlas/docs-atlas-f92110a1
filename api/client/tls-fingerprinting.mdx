@@ -1,0 +1,517 @@
+---
+title: 'TLS & HTTP/2 Fingerprinting'
+description: 'Browser fingerprinting profiles, TLS ClientHello, and HTTP/2 settings'
+---
+
+## Overview
+
+The client package provides sophisticated TLS and HTTP/2 fingerprinting capabilities to mimic real browsers. This allows HTTP clients to appear as legitimate browser traffic to servers that perform fingerprint analysis.
+
+## Browser Enum
+
+```go
+type Browser string
+```
+
+Browser identifies the browser for TLS and HTTP/2 fingerprinting.
+
+### Supported Browsers
+
+<ParamField path="BrowserChrome" type="Browser">
+  Google Chrome - uses `HelloChrome_Auto` TLS fingerprint
+</ParamField>
+
+<ParamField path="BrowserEdge" type="Browser">
+  Microsoft Edge - uses `HelloChrome_Auto` with Edge branding
+</ParamField>
+
+<ParamField path="BrowserBrave" type="Browser">
+  Brave browser - uses `HelloChrome_Auto` with Brave branding
+</ParamField>
+
+<ParamField path="BrowserSafari" type="Browser">
+  Apple Safari - uses `HelloSafari_Auto` or `HelloIOS_Auto` TLS fingerprint
+</ParamField>
+
+<ParamField path="BrowserFirefox" type="Browser">
+  Mozilla Firefox - uses `HelloFirefox_Auto` TLS fingerprint
+</ParamField>
+
+**Source:** `/home/daytona/workspace/source/pkg/client/fingerprint.go:16`
+
+### Constants
+
+```go
+const (
+    BrowserChrome  Browser = "chrome"
+    BrowserEdge    Browser = "edge"
+    BrowserBrave   Browser = "brave"
+    BrowserSafari  Browser = "safari"
+    BrowserFirefox Browser = "firefox"
+)
+```
+
+## Platform Enum
+
+```go
+type Platform string
+```
+
+Platform identifies the OS platform for TLS and HTTP/2 fingerprinting.
+
+### Supported Platforms
+
+<ParamField path="PlatformWindows" type="Platform">
+  Windows operating system - "Windows NT 10.0; Win64; x64" in User-Agent
+</ParamField>
+
+<ParamField path="PlatformMac" type="Platform">
+  macOS - "Macintosh; Intel Mac OS X 10_15_7" in User-Agent
+</ParamField>
+
+<ParamField path="PlatformLinux" type="Platform">
+  Linux - "X11; Linux x86_64" in User-Agent
+</ParamField>
+
+<ParamField path="PlatformIOS" type="Platform">
+  iOS - "iPhone; CPU iPhone OS" in User-Agent
+</ParamField>
+
+<ParamField path="PlatformIPadOS" type="Platform">
+  iPadOS - "iPhone; CPU iPhone OS" in User-Agent (Safari only)
+</ParamField>
+
+**Source:** `/home/daytona/workspace/source/pkg/client/fingerprint.go:32`
+
+### Constants
+
+```go
+const (
+    PlatformWindows Platform = "windows"
+    PlatformMac     Platform = "mac"
+    PlatformLinux   Platform = "linux"
+    PlatformIOS     Platform = "ios"
+    PlatformIPadOS  Platform = "ipados"
+)
+```
+
+## H2Profile Type
+
+```go
+type H2Profile struct {
+    Settings         []http2.Setting
+    ConnectionWindow uint32
+    Priority         http2.PriorityParam
+    PseudoOrder      []string
+}
+```
+
+H2Profile contains HTTP/2 connection settings that control the fingerprint of the HTTP/2 SETTINGS frame and WINDOW_UPDATE.
+
+<ParamField path="Settings" type="[]http2.Setting">
+  HTTP/2 SETTINGS frame parameters sent during connection preface
+</ParamField>
+
+<ParamField path="ConnectionWindow" type="uint32">
+  Initial connection window size (triggers WINDOW_UPDATE if > 65535)
+</ParamField>
+
+<ParamField path="Priority" type="http2.PriorityParam">
+  Stream priority parameters for the HEADERS frame
+</ParamField>
+
+<ParamField path="PseudoOrder" type="[]string">
+  Order of pseudo-headers (":method", ":authority", ":scheme", ":path")
+</ParamField>
+
+**Source:** `/home/daytona/workspace/source/pkg/client/fingerprint.go:47`
+
+## BrowserProfile Type
+
+```go
+type BrowserProfile struct {
+    ClientHelloID  utls.ClientHelloID
+    H2             H2Profile
+    DefaultHeaders http.Header
+}
+```
+
+BrowserProfile combines a TLS ClientHelloID with HTTP/2 settings and default request headers for a specific browser identity.
+
+<ParamField path="ClientHelloID" type="utls.ClientHelloID">
+  TLS ClientHello fingerprint from the utls library
+</ParamField>
+
+<ParamField path="H2" type="H2Profile">
+  HTTP/2 profile with SETTINGS, window size, and pseudo-header order
+</ParamField>
+
+<ParamField path="DefaultHeaders" type="http.Header">
+  Default HTTP headers automatically added to requests
+</ParamField>
+
+**Source:** `/home/daytona/workspace/source/pkg/client/fingerprint.go:56`
+
+## Pre-configured HTTP/2 Profiles
+
+### Chrome/Edge/Brave Profile
+
+```go
+var h2Chrome = H2Profile{
+    Settings: []http2.Setting{
+        {ID: http2.SettingHeaderTableSize, Val: 65536},
+        {ID: http2.SettingEnablePush, Val: 0},
+        {ID: http2.SettingInitialWindowSize, Val: 6291456},
+        {ID: http2.SettingMaxHeaderListSize, Val: 262144},
+    },
+    ConnectionWindow: 15663105,
+    Priority: http2.PriorityParam{
+        Weight: 255,
+    },
+    PseudoOrder: []string{":method", ":authority", ":scheme", ":path"},
+}
+```
+
+**Characteristics:**
+- Large initial window (6MB)
+- Large connection window (15MB)
+- Maximum priority weight (255)
+- Push disabled
+
+**Source:** `/home/daytona/workspace/source/pkg/client/fingerprint.go:66`
+
+### Safari Profile
+
+```go
+var h2Safari = H2Profile{
+    Settings: []http2.Setting{
+        {ID: http2.SettingHeaderTableSize, Val: 4096},
+        {ID: http2.SettingEnablePush, Val: 0},
+        {ID: http2.SettingInitialWindowSize, Val: 2097152},
+        {ID: http2.SettingMaxConcurrentStreams, Val: 100},
+        {ID: settingEnableConnectProtocol, Val: 1},
+    },
+    ConnectionWindow: 10485760,
+    Priority: http2.PriorityParam{
+        Weight: 254,
+    },
+    PseudoOrder: []string{":method", ":scheme", ":path", ":authority"},
+}
+```
+
+**Characteristics:**
+- Smaller header table (4KB)
+- Medium initial window (2MB)
+- Different pseudo-header order (`:authority` last)
+- CONNECT protocol enabled
+- Max concurrent streams limit (100)
+
+**Source:** `/home/daytona/workspace/source/pkg/client/fingerprint.go:80`
+
+### Firefox Profile
+
+```go
+var h2Firefox = H2Profile{
+    Settings: []http2.Setting{
+        {ID: http2.SettingHeaderTableSize, Val: 65536},
+        {ID: http2.SettingInitialWindowSize, Val: 131072},
+        {ID: http2.SettingMaxFrameSize, Val: 16384},
+    },
+    ConnectionWindow: 12517377,
+    Priority: http2.PriorityParam{
+        StreamDep: 13,
+        Weight:    41,
+    },
+    PseudoOrder: []string{":method", ":path", ":authority", ":scheme"},
+}
+```
+
+**Characteristics:**
+- Small initial window (128KB)
+- Stream dependency (13)
+- Lower priority weight (41)
+- Different pseudo-header order (`:path` before `:authority`)
+
+**Source:** `/home/daytona/workspace/source/pkg/client/fingerprint.go:95`
+
+## User-Agent Strings
+
+### Chrome on Windows
+
+```
+Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/fingerprint.go:132`
+
+### Chrome on macOS
+
+```
+Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/fingerprint.go:128`
+
+### Chrome on Linux
+
+```
+Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/fingerprint.go:130`
+
+### Edge on Windows
+
+```
+Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/fingerprint.go:136`
+
+### Safari on macOS
+
+```
+Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/fingerprint.go:187`
+
+### Safari on iOS
+
+```
+Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/fingerprint.go:184`
+
+### Firefox on Windows
+
+```
+Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/fingerprint.go:209`
+
+### Firefox on macOS
+
+```
+Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:120.0) Gecko/20100101 Firefox/120.0
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/fingerprint.go:205`
+
+### Firefox on Linux
+
+```
+Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/fingerprint.go:207`
+
+## Client Hint Headers (Chromium)
+
+For Chromium-based browsers (Chrome, Edge, Brave), the following headers are automatically set:
+
+### sec-ch-ua
+
+```
+"Chromium";v="131", "Google Chrome";v="131", "Not/A)Brand";v="8"
+```
+
+Brand varies by browser:
+- Chrome: `"Google Chrome"`
+- Edge: `"Microsoft Edge"`
+- Brave: `"Brave"`
+
+**Source:** `/home/daytona/workspace/source/pkg/client/fingerprint.go:149`
+
+### sec-ch-ua-mobile
+
+```
+?0
+```
+
+Indicates non-mobile browser.
+
+**Source:** `/home/daytona/workspace/source/pkg/client/fingerprint.go:164`
+
+### sec-ch-ua-platform
+
+Platform-specific:
+- Windows: `"Windows"`
+- macOS: `"macOS"`
+- Linux: `"Linux"`
+
+**Source:** `/home/daytona/workspace/source/pkg/client/fingerprint.go:152`
+
+## Header Ordering
+
+### HeaderOrderKey
+
+```go
+const HeaderOrderKey = "Header-Order"
+```
+
+Magic header key that controls the order of regular headers in HTTP/2 HEADERS frames and HTTP/1.1 requests. Its values specify header names in the desired wire order. The key itself is never sent.
+
+**Example:**
+```go
+req.Header[client.HeaderOrderKey] = []string{
+    "accept",
+    "accept-language",
+    "user-agent",
+    "referer",
+}
+```
+
+If not set, headers are shuffled randomly (matching Chrome v106+ behavior).
+
+**Source:** `/home/daytona/workspace/source/pkg/client/header.go:11`
+
+### PseudoHeaderOrderKey
+
+```go
+const PseudoHeaderOrderKey = "Psuedo-Header-Order"
+```
+
+Magic header key that overrides the browser profile's pseudo-header order for a single request. Values are pseudo-header names such as `:method`, `:authority`, `:scheme`, and `:path`.
+
+**Example:**
+```go
+req.Header[client.PseudoHeaderOrderKey] = []string{
+    ":method",
+    ":scheme",
+    ":path",
+    ":authority",
+}
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/header.go:16`
+
+## Usage Examples
+
+### Standard Browser Profiles
+
+```go
+// Chrome on Windows (default)
+c1, _ := client.New()
+
+// Safari on macOS
+c2, _ := client.New(
+    client.WithBrowser(client.BrowserSafari),
+    client.WithPlatform(client.PlatformMac),
+    client.WithBrowserVersion("17.0"),
+)
+
+// Firefox on Linux
+c3, _ := client.New(
+    client.WithBrowser(client.BrowserFirefox),
+    client.WithPlatform(client.PlatformLinux),
+    client.WithBrowserVersion("120.0"),
+)
+
+// Edge on Windows
+c4, _ := client.New(
+    client.WithBrowser(client.BrowserEdge),
+    client.WithBrowserVersion("120.0.0.0"),
+)
+```
+
+### Custom HTTP/2 Profile
+
+```go
+import "golang.org/x/net/http2"
+
+customH2 := client.H2Profile{
+    Settings: []http2.Setting{
+        {ID: http2.SettingHeaderTableSize, Val: 4096},
+        {ID: http2.SettingInitialWindowSize, Val: 65536},
+    },
+    ConnectionWindow: 1048576,
+    Priority: http2.PriorityParam{
+        Weight: 128,
+    },
+    PseudoOrder: []string{":method", ":path", ":authority", ":scheme"},
+}
+
+c, _ := client.New(
+    client.WithH2Profile(customH2),
+)
+```
+
+### Custom TLS Fingerprint
+
+```go
+import utls "github.com/refraction-networking/utls"
+
+c, _ := client.New(
+    client.WithClientHelloID(utls.HelloFirefox_105),
+)
+```
+
+### Custom Header Order
+
+```go
+c, _ := client.New()
+
+req, _ := http.NewRequest("GET", "https://example.com", nil)
+req.Header.Set("accept", "text/html")
+req.Header.Set("accept-language", "en-US")
+req.Header.Set("cache-control", "no-cache")
+
+// Control header wire order
+req.Header[client.HeaderOrderKey] = []string{
+    "accept",
+    "cache-control",
+    "accept-language",
+}
+
+resp, _ := c.Do(req)
+```
+
+### Safari iOS Profile
+
+```go
+c, _ := client.New(
+    client.WithBrowser(client.BrowserSafari),
+    client.WithPlatform(client.PlatformIOS),
+    client.WithBrowserVersion("17.1"),
+)
+
+fmt.Println(c.UserAgent())
+// Output: Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1
+```
+
+## Implementation Details
+
+### Profile Resolution
+
+The `resolveProfile` function combines browser, version, and platform to generate a complete `BrowserProfile`:
+
+1. Select base profile (Chrome, Safari, or Firefox)
+2. Generate platform-specific User-Agent string
+3. Generate client hints for Chromium browsers
+4. Apply custom overrides if provided
+
+**Source:** `/home/daytona/workspace/source/pkg/client/fingerprint.go:111`
+
+### TLS Handshake
+
+TLS connections use the [utls library](https://github.com/refraction-networking/utls) to mimic browser TLS fingerprints:
+
+- **Chrome/Edge/Brave:** `utls.HelloChrome_Auto`
+- **Safari macOS:** `utls.HelloSafari_Auto`
+- **Safari iOS:** `utls.HelloIOS_Auto`
+- **Firefox:** `utls.HelloFirefox_Auto`
+
+**Source:** `/home/daytona/workspace/source/pkg/client/fingerprint.go:168`
+
+### HTTP/2 Connection Preface
+
+When negotiating HTTP/2 via ALPN, the client sends:
+
+1. HTTP/2 connection preface: `"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"`
+2. SETTINGS frame with browser-specific settings
+3. WINDOW_UPDATE frame if connection window > 65535
+
+**Source:** `/home/daytona/workspace/source/pkg/client/h2.go:48`

@@ -1,0 +1,602 @@
+---
+title: 'State Persistence'
+description: 'Generic file-backed JSON state persistence with cross-platform locking'
+---
+
+The `state` package provides generic, type-safe file-backed JSON state persistence with exclusive file locking to prevent concurrent access from multiple processes.
+
+## Installation
+
+```go
+import "github.com/aarock1234/go-template/pkg/state"
+```
+
+## Quick Start
+
+Persist state across application restarts:
+
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+    
+    "github.com/aarock1234/go-template/pkg/state"
+)
+
+type AppState struct {
+    Counter int      `json:"counter"`
+    Users   []string `json:"users"`
+}
+
+func main() {
+    // Open state file (creates if doesn't exist)
+    sf, err := state.Open[AppState]("app-state.json")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer sf.Close()
+    
+    // Load existing state
+    s, err := sf.Load()
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    if s == nil {
+        // First run - initialize state
+        s = &AppState{Counter: 0, Users: []string{}}
+    }
+    
+    // Modify state
+    s.Counter++
+    s.Users = append(s.Users, "alice")
+    
+    // Save state
+    if err := sf.Save(s); err != nil {
+        log.Fatal(err)
+    }
+    
+    fmt.Printf("Counter: %d, Users: %v\n", s.Counter, s.Users)
+}
+```
+
+## Core Type
+
+### File
+
+Manages a JSON file that persists state of type T.
+
+```go
+type File[T any] struct {
+    // private fields
+}
+```
+
+The File holds an **exclusive lock** on the underlying file for its entire lifetime to prevent concurrent access from multiple process instances.
+
+## Functions
+
+### Open
+
+Creates or opens a state file with exclusive locking.
+
+```go
+func Open[T any](path string) (*File[T], error)
+```
+
+<ParamField path="path" type="string">
+  Path to the state file. Created if it doesn't exist.
+</ParamField>
+
+**Behavior:**
+- Creates the file if it doesn't exist with 0644 permissions
+- Acquires a non-blocking exclusive lock
+- Returns error immediately if another process holds the lock
+- Must call `Close()` when done to release the lock
+
+**Example:**
+
+```go
+type Config struct {
+    APIKey string `json:"api_key"`
+    Debug  bool   `json:"debug"`
+}
+
+sf, err := state.Open[Config]("config.json")
+if err != nil {
+    return fmt.Errorf("opening state: %w", err)
+}
+defer sf.Close()
+```
+
+### Load
+
+Reads and unmarshals the persisted state from disk.
+
+```go
+func (f *File[T]) Load() (*T, error)
+```
+
+**Returns:**
+- `(*T, nil)` on success with the unmarshaled state
+- `(nil, nil)` if the file is empty (first run)
+- `(nil, error)` on error
+
+**Example:**
+
+```go
+state, err := sf.Load()
+if err != nil {
+    return fmt.Errorf("loading state: %w", err)
+}
+
+if state == nil {
+    // First run - initialize with defaults
+    state = &Config{
+        APIKey: "default-key",
+        Debug:  false,
+    }
+}
+```
+
+### Save
+
+Marshals and persists the state to disk.
+
+```go
+func (f *File[T]) Save(v *T) error
+```
+
+<ParamField path="v" type="*T">
+  State to persist
+</ParamField>
+
+**Behavior:**
+- Marshals state to JSON
+- Truncates the file
+- Writes new content
+- Flushes to disk (fsync)
+- Atomically replaces old content
+
+**Example:**
+
+```go
+config.Debug = true
+config.APIKey = "new-key"
+
+if err := sf.Save(config); err != nil {
+    return fmt.Errorf("saving state: %w", err)
+}
+```
+
+### Close
+
+Releases the exclusive lock and closes the file.
+
+```go
+func (f *File[T]) Close() error
+```
+
+Always call `Close()` when done, typically with `defer`:
+
+```go
+sf, err := state.Open[MyState]("state.json")
+if err != nil {
+    return err
+}
+defer sf.Close() // Ensures lock is released
+```
+
+## File Locking
+
+The package uses cross-platform exclusive file locking:
+
+**Unix/Linux/macOS:**
+- Uses `flock(LOCK_EX | LOCK_NB)`
+- Non-blocking exclusive lock
+
+**Windows:**
+- Uses `LockFileEx` with `LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY`
+- Non-blocking exclusive lock
+
+**Behavior:**
+- Only one process can hold the lock at a time
+- `Open()` fails immediately if lock is held by another process
+- Lock is automatically released when process exits
+- Lock is held for the entire lifetime of the `File[T]`
+
+## Usage Examples
+
+### Application Configuration
+
+```go
+package main
+
+import (
+    "log"
+    
+    "github.com/aarock1234/go-template/pkg/state"
+)
+
+type Config struct {
+    ServerPort int      `json:"server_port"`
+    LogLevel   string   `json:"log_level"`
+    Features   []string `json:"features"`
+}
+
+func loadConfig() (*Config, error) {
+    sf, err := state.Open[Config]("app.config.json")
+    if err != nil {
+        return nil, err
+    }
+    defer sf.Close()
+    
+    cfg, err := sf.Load()
+    if err != nil {
+        return nil, err
+    }
+    
+    if cfg == nil {
+        // First run - use defaults
+        cfg = &Config{
+            ServerPort: 8080,
+            LogLevel:   "info",
+            Features:   []string{"auth", "api"},
+        }
+        
+        // Save defaults
+        if err := sf.Save(cfg); err != nil {
+            return nil, err
+        }
+    }
+    
+    return cfg, nil
+}
+```
+
+### Progress Tracking
+
+```go
+import (
+    "fmt"
+    "time"
+    
+    "github.com/aarock1234/go-template/pkg/state"
+)
+
+type Progress struct {
+    ProcessedItems int       `json:"processed_items"`
+    LastRun        time.Time `json:"last_run"`
+    Errors         []string  `json:"errors"`
+}
+
+func trackProgress(items []string) error {
+    sf, err := state.Open[Progress]("progress.json")
+    if err != nil {
+        return err
+    }
+    defer sf.Close()
+    
+    progress, err := sf.Load()
+    if err != nil {
+        return err
+    }
+    
+    if progress == nil {
+        progress = &Progress{
+            ProcessedItems: 0,
+            Errors:         []string{},
+        }
+    }
+    
+    // Process items
+    for _, item := range items {
+        if err := processItem(item); err != nil {
+            progress.Errors = append(progress.Errors, err.Error())
+            continue
+        }
+        progress.ProcessedItems++
+    }
+    
+    progress.LastRun = time.Now()
+    
+    return sf.Save(progress)
+}
+```
+
+### Cache Management
+
+```go
+import (
+    "time"
+    
+    "github.com/aarock1234/go-template/pkg/state"
+)
+
+type Cache struct {
+    Data      map[string]string `json:"data"`
+    ExpiresAt time.Time         `json:"expires_at"`
+}
+
+func getCachedData(key string) (string, error) {
+    sf, err := state.Open[Cache]("cache.json")
+    if err != nil {
+        return "", err
+    }
+    defer sf.Close()
+    
+    cache, err := sf.Load()
+    if err != nil {
+        return "", err
+    }
+    
+    // Check if cache exists and is valid
+    if cache != nil && time.Now().Before(cache.ExpiresAt) {
+        if value, ok := cache.Data[key]; ok {
+            return value, nil
+        }
+    }
+    
+    // Cache miss or expired - fetch fresh data
+    value := fetchFreshData(key)
+    
+    // Update cache
+    if cache == nil {
+        cache = &Cache{
+            Data: make(map[string]string),
+        }
+    }
+    
+    cache.Data[key] = value
+    cache.ExpiresAt = time.Now().Add(1 * time.Hour)
+    
+    if err := sf.Save(cache); err != nil {
+        return value, err // Return value even if save fails
+    }
+    
+    return value, nil
+}
+```
+
+### Preventing Concurrent Runs
+
+```go
+import (
+    "fmt"
+    "time"
+    
+    "github.com/aarock1234/go-template/pkg/state"
+)
+
+type LockState struct {
+    StartedAt time.Time `json:"started_at"`
+    PID       int       `json:"pid"`
+}
+
+func runExclusively() error {
+    // Try to acquire lock
+    sf, err := state.Open[LockState]("app.lock")
+    if err != nil {
+        return fmt.Errorf("another instance is already running")
+    }
+    defer sf.Close()
+    
+    // Save lock info
+    lockInfo := &LockState{
+        StartedAt: time.Now(),
+        PID:       os.Getpid(),
+    }
+    
+    if err := sf.Save(lockInfo); err != nil {
+        return err
+    }
+    
+    // Do work - lock is held until Close() is called
+    return doWork()
+}
+```
+
+### Job Queue State
+
+```go
+import (
+    "github.com/aarock1234/go-template/pkg/state"
+)
+
+type Job struct {
+    ID     string `json:"id"`
+    Status string `json:"status"`
+    Data   string `json:"data"`
+}
+
+type Queue struct {
+    Pending   []Job `json:"pending"`
+    Completed []Job `json:"completed"`
+}
+
+func processQueue() error {
+    sf, err := state.Open[Queue]("queue.json")
+    if err != nil {
+        return err
+    }
+    defer sf.Close()
+    
+    queue, err := sf.Load()
+    if err != nil {
+        return err
+    }
+    
+    if queue == nil {
+        queue = &Queue{
+            Pending:   []Job{},
+            Completed: []Job{},
+        }
+    }
+    
+    // Process pending jobs
+    for len(queue.Pending) > 0 {
+        job := queue.Pending[0]
+        queue.Pending = queue.Pending[1:]
+        
+        // Process job
+        if err := processJob(job); err != nil {
+            // Re-add to pending on error
+            queue.Pending = append(queue.Pending, job)
+            break
+        }
+        
+        job.Status = "completed"
+        queue.Completed = append(queue.Completed, job)
+        
+        // Save after each job
+        if err := sf.Save(queue); err != nil {
+            return err
+        }
+    }
+    
+    return nil
+}
+```
+
+## Error Handling
+
+### Lock Already Held
+
+```go
+sf, err := state.Open[MyState]("state.json")
+if err != nil {
+    // Another process is using the file
+    return fmt.Errorf("state file is locked by another process: %w", err)
+}
+defer sf.Close()
+```
+
+### Empty File Handling
+
+```go
+state, err := sf.Load()
+if err != nil {
+    return fmt.Errorf("loading state: %w", err)
+}
+
+if state == nil {
+    // File was empty - first run
+    state = &MyState{} // Initialize with defaults
+}
+```
+
+### Save Errors
+
+```go
+if err := sf.Save(state); err != nil {
+    return fmt.Errorf("persisting state: %w", err)
+}
+```
+
+## Best Practices
+
+<Tip>
+  **Always use defer Close():** Ensures the lock is released even if your function panics or returns early.
+</Tip>
+
+<Tip>
+  **Check for nil after Load():** A nil return means the file was empty (first run). Initialize with defaults.
+</Tip>
+
+<Warning>
+  **Keep lock duration short:** The file is locked for the entire lifetime of the File[T]. Open, load/save, and close as quickly as possible.
+</Warning>
+
+<Tip>
+  **Use for single-instance enforcement:** The exclusive lock makes it perfect for preventing multiple instances of an application from running.
+</Tip>
+
+<Tip>
+  **JSON-serializable types only:** Your state type T must be serializable to JSON. Use struct tags to control field names.
+</Tip>
+
+## Platform Support
+
+The package works identically on:
+- Linux
+- macOS
+- Windows
+- Other Unix-like systems
+
+Locking is implemented using platform-specific APIs but provides a consistent interface.
+
+## Complete Example
+
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+    "time"
+    
+    "github.com/aarock1234/go-template/pkg/state"
+)
+
+type AppState struct {
+    RunCount    int       `json:"run_count"`
+    LastRun     time.Time `json:"last_run"`
+    TotalErrors int       `json:"total_errors"`
+    Config      struct {
+        MaxRetries int  `json:"max_retries"`
+        Debug      bool `json:"debug"`
+    } `json:"config"`
+}
+
+func main() {
+    // Try to acquire state file lock
+    sf, err := state.Open[AppState]("app-state.json")
+    if err != nil {
+        log.Fatalf("Failed to open state file (another instance running?): %v", err)
+    }
+    defer sf.Close()
+    
+    // Load existing state
+    appState, err := sf.Load()
+    if err != nil {
+        log.Fatalf("Failed to load state: %v", err)
+    }
+    
+    // Initialize if first run
+    if appState == nil {
+        log.Println("First run - initializing state")
+        appState = &AppState{
+            RunCount:    0,
+            TotalErrors: 0,
+        }
+        appState.Config.MaxRetries = 3
+        appState.Config.Debug = false
+    }
+    
+    // Update state
+    appState.RunCount++
+    appState.LastRun = time.Now()
+    
+    log.Printf("Run #%d (last run: %v)", appState.RunCount, appState.LastRun)
+    
+    // Do some work
+    if err := doWork(appState.Config.MaxRetries); err != nil {
+        appState.TotalErrors++
+        log.Printf("Error occurred (total: %d): %v", appState.TotalErrors, err)
+    }
+    
+    // Save updated state
+    if err := sf.Save(appState); err != nil {
+        log.Fatalf("Failed to save state: %v", err)
+    }
+    
+    log.Println("State saved successfully")
+}
+
+func doWork(maxRetries int) error {
+    // Your application logic here
+    return nil
+}
+```

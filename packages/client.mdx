@@ -1,0 +1,504 @@
+---
+title: 'HTTP Client'
+description: 'HTTP client with TLS fingerprinting, HTTP/2 control, and proxy support'
+---
+
+The `client` package provides an HTTP client with advanced features for browser emulation, including TLS fingerprinting, HTTP/2 fingerprint control, custom cookie handling, and proxy support.
+
+## Installation
+
+```go
+import "github.com/aarock1234/go-template/pkg/client"
+```
+
+## Quick Start
+
+Create a client and make a request:
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "net/http"
+    
+    "github.com/aarock1234/go-template/pkg/client"
+)
+
+func main() {
+    // Create a new client with default settings
+    c, err := client.New()
+    if err != nil {
+        panic(err)
+    }
+    
+    // Make a request
+    req, _ := http.NewRequest("GET", "https://example.com", nil)
+    resp, err := c.Do(req)
+    if err != nil {
+        panic(err)
+    }
+    defer resp.Body.Close()
+    
+    fmt.Println("Status:", resp.StatusCode)
+}
+```
+
+## Client Creation
+
+### New
+
+Creates a new Client with the given options.
+
+```go
+func New(opts ...Option) (*Client, error)
+```
+
+<ParamField path="opts" type="...Option">
+  Optional configuration functions to customize the client
+</ParamField>
+
+**Default Settings:**
+- Browser: Chrome
+- Platform: Windows
+- Keep-alives: Disabled
+- Session tickets: Disabled
+- TLS verification: Skipped
+
+## Configuration Options
+
+Customize the client with these options:
+
+### WithBrowser
+
+Sets the browser identity for TLS and HTTP/2 fingerprinting.
+
+```go
+func WithBrowser(b Browser) Option
+```
+
+<ParamField path="b" type="Browser">
+  Browser identity. Available options:
+  - `BrowserChrome` - Google Chrome
+  - `BrowserEdge` - Microsoft Edge
+  - `BrowserBrave` - Brave browser
+  - `BrowserSafari` - Apple Safari
+  - `BrowserFirefox` - Mozilla Firefox
+</ParamField>
+
+**Example:**
+
+```go
+c, err := client.New(
+    client.WithBrowser(client.BrowserFirefox),
+)
+```
+
+### WithBrowserVersion
+
+Sets the browser version for TLS fingerprinting.
+
+```go
+func WithBrowserVersion(v string) Option
+```
+
+<ParamField path="v" type="string">
+  Browser version string (e.g., "131.0.0.0")
+</ParamField>
+
+### WithPlatform
+
+Sets the OS platform for TLS and HTTP/2 fingerprinting.
+
+```go
+func WithPlatform(p Platform) Option
+```
+
+<ParamField path="p" type="Platform">
+  Operating system platform. Available options:
+  - `PlatformWindows` - Windows
+  - `PlatformMac` - macOS
+  - `PlatformLinux` - Linux
+  - `PlatformIOS` - iOS
+  - `PlatformIPadOS` - iPadOS
+</ParamField>
+
+### WithProxy
+
+Configures proxy settings for the client.
+
+```go
+func WithProxy(p *Proxy) Option
+```
+
+<ParamField path="p" type="*Proxy">
+  Proxy configuration
+</ParamField>
+
+**Example:**
+
+```go
+proxy, err := client.ParseProxy("127.0.0.1:8080:user:pass", client.ProxySchemeHTTP)
+if err != nil {
+    panic(err)
+}
+
+c, err := client.New(
+    client.WithProxy(proxy),
+)
+```
+
+### WithInsecureSkipVerify
+
+Controls whether TLS certificate verification is skipped.
+
+```go
+func WithInsecureSkipVerify(d bool) Option
+```
+
+<ParamField path="d" type="bool">
+  Set to false to enable TLS certificate verification
+</ParamField>
+
+### WithDisableKeepAlives
+
+Controls whether HTTP keep-alives are disabled.
+
+```go
+func WithDisableKeepAlives(d bool) Option
+```
+
+<ParamField path="d" type="bool">
+  Set to false to enable HTTP keep-alives
+</ParamField>
+
+### WithDefaultHeaderOverrides
+
+Overrides browser profile default headers.
+
+```go
+func WithDefaultHeaderOverrides(h http.Header) Option
+```
+
+<ParamField path="h" type="http.Header">
+  Headers to override in the browser profile
+</ParamField>
+
+## Making Requests
+
+### Do
+
+Sends an HTTP request and returns an HTTP response.
+
+```go
+func (c *Client) Do(req *http.Request) (*http.Response, error)
+```
+
+<ParamField path="req" type="*http.Request">
+  The HTTP request to send
+</ParamField>
+
+Redirects are followed automatically (up to 10), and cookies from intermediate responses are captured and applied to subsequent requests.
+
+**Example:**
+
+```go
+req, _ := http.NewRequestWithContext(ctx, "POST", "https://api.example.com/data", body)
+req.Header.Set("Content-Type", "application/json")
+
+resp, err := c.Do(req)
+if err != nil {
+    return err
+}
+defer resp.Body.Close()
+```
+
+## Cookie Management
+
+### SetCookies
+
+Stores cookies for a given URL.
+
+```go
+func (c *Client) SetCookies(u *url.URL, cookies []*http.Cookie)
+```
+
+<ParamField path="u" type="*url.URL">
+  The URL to associate cookies with
+</ParamField>
+
+<ParamField path="cookies" type="[]*http.Cookie">
+  Cookies to store
+</ParamField>
+
+### SetCookieString
+
+Sets cookies with a specific domain for subdomain sharing.
+
+```go
+func (c *Client) SetCookieString(domain string, cookieString string, exclude ...string) error
+```
+
+<ParamField path="domain" type="string">
+  Domain with leading dot (e.g., ".example.com")
+</ParamField>
+
+<ParamField path="cookieString" type="string">
+  Cookie string in "name=value; name2=value2" format
+</ParamField>
+
+<ParamField path="exclude" type="...string">
+  Optional cookie names to filter out
+</ParamField>
+
+**Example:**
+
+```go
+err := c.SetCookieString(".example.com", "session_id=abc123; user_id=456", "old_cookie")
+```
+
+### GetCookies
+
+Returns cookies for a given domain.
+
+```go
+func (c *Client) GetCookies(domain string) []*http.Cookie
+```
+
+<ParamField path="domain" type="string">
+  Domain to retrieve cookies for
+</ParamField>
+
+### GetCookieString
+
+Returns cookies as a semicolon-separated string.
+
+```go
+func (c *Client) GetCookieString(domain string) string
+```
+
+<ParamField path="domain" type="string">
+  Domain to retrieve cookies for
+</ParamField>
+
+### FindCookie
+
+Finds a specific cookie by name.
+
+```go
+func (c *Client) FindCookie(name string, domain string) (*http.Cookie, bool)
+```
+
+<ParamField path="name" type="string">
+  Cookie name to search for
+</ParamField>
+
+<ParamField path="domain" type="string">
+  Domain to search in
+</ParamField>
+
+Returns the cookie and true if found, or nil and false otherwise.
+
+### ClearCookies
+
+Clears all cookies by creating a new jar.
+
+```go
+func (c *Client) ClearCookies() error
+```
+
+## Proxy Support
+
+### Proxy Types
+
+The client supports multiple proxy schemes:
+
+```go
+const (
+    ProxySchemeHTTP    ProxyScheme = "http"     // HTTP CONNECT proxy
+    ProxySchemeHTTPS   ProxyScheme = "https"    // HTTPS CONNECT proxy
+    ProxySchemeSOCKS5  ProxyScheme = "socks5"   // SOCKS5 with local DNS
+    ProxySchemeSOCKS5H ProxyScheme = "socks5h"  // SOCKS5 with remote DNS
+)
+```
+
+### ParseProxy
+
+Parses a proxy string into a Proxy struct.
+
+```go
+func ParseProxy(proxy string, scheme ProxyScheme) (*Proxy, error)
+```
+
+<ParamField path="proxy" type="string">
+  Proxy in "host:port" or "host:port:user:pass" format
+</ParamField>
+
+<ParamField path="scheme" type="ProxyScheme">
+  Proxy scheme (http, https, socks5, socks5h)
+</ParamField>
+
+**Example:**
+
+```go
+// Without authentication
+proxy, err := client.ParseProxy("127.0.0.1:8080", client.ProxySchemeHTTP)
+
+// With authentication
+proxy, err := client.ParseProxy("proxy.example.com:3128:user:pass", client.ProxySchemeHTTP)
+```
+
+### ImportProxies
+
+Reads and parses proxy configurations from a file.
+
+```go
+func ImportProxies(filename string, scheme ProxyScheme) ([]*Proxy, error)
+```
+
+<ParamField path="filename" type="string">
+  Path to file containing proxies (one per line)
+</ParamField>
+
+<ParamField path="scheme" type="ProxyScheme">
+  Proxy scheme to use for all proxies
+</ParamField>
+
+**Example:**
+
+```go
+proxies, err := client.ImportProxies("proxies.txt", client.ProxySchemeHTTP)
+if err != nil {
+    panic(err)
+}
+
+for _, proxy := range proxies {
+    c, _ := client.New(client.WithProxy(proxy))
+    // Use client...
+}
+```
+
+## Utility Methods
+
+### UserAgent
+
+Returns the default User-Agent header.
+
+```go
+func (c *Client) UserAgent() string
+```
+
+### ClientHint
+
+Returns the default sec-ch-ua header.
+
+```go
+func (c *Client) ClientHint() string
+```
+
+### Proxy
+
+Returns the proxy configuration.
+
+```go
+func (c *Client) Proxy() *Proxy
+```
+
+## Advanced Cookie Parsing
+
+### ParseCookies
+
+Parses a raw cookie string into an http.Cookie slice.
+
+```go
+func ParseCookies(cookieStr string) []*http.Cookie
+```
+
+<ParamField path="cookieStr" type="string">
+  Cookie string in "name=value; name2=value2" format or JSON array format
+</ParamField>
+
+### ParseSetCookie
+
+Parses a single Set-Cookie header with relaxed validation.
+
+```go
+func ParseSetCookie(line string) (*http.Cookie, error)
+```
+
+<ParamField path="line" type="string">
+  Set-Cookie header value
+</ParamField>
+
+This function uses relaxed validation that allows double-quote characters in cookie values.
+
+## Complete Example
+
+```go
+package main
+
+import (
+    "bytes"
+    "context"
+    "encoding/json"
+    "fmt"
+    "net/http"
+    
+    "github.com/aarock1234/go-template/pkg/client"
+)
+
+func main() {
+    // Parse proxy
+    proxy, err := client.ParseProxy("127.0.0.1:8080:user:pass", client.ProxySchemeHTTP)
+    if err != nil {
+        panic(err)
+    }
+    
+    // Create client with custom configuration
+    c, err := client.New(
+        client.WithBrowser(client.BrowserChrome),
+        client.WithPlatform(client.PlatformMac),
+        client.WithProxy(proxy),
+        client.WithInsecureSkipVerify(false), // Enable TLS verification
+    )
+    if err != nil {
+        panic(err)
+    }
+    
+    // Set cookies
+    c.SetCookieString(".example.com", "session=abc123; user_id=456", nil)
+    
+    // Make authenticated request
+    payload := map[string]string{"key": "value"}
+    body, _ := json.Marshal(payload)
+    
+    req, _ := http.NewRequestWithContext(context.Background(), "POST", "https://api.example.com/data", bytes.NewReader(body))
+    req.Header.Set("Content-Type", "application/json")
+    
+    resp, err := c.Do(req)
+    if err != nil {
+        panic(err)
+    }
+    defer resp.Body.Close()
+    
+    fmt.Println("Status:", resp.StatusCode)
+    fmt.Println("User-Agent:", c.UserAgent())
+    
+    // Retrieve cookies after request
+    cookies := c.GetCookies(".example.com")
+    for _, cookie := range cookies {
+        fmt.Printf("Cookie: %s=%s\n", cookie.Name, cookie.Value)
+    }
+}
+```
+
+## Error Handling
+
+The client defines specific errors:
+
+```go
+var ErrTooManyRedirects = errors.New("too many redirects")
+```
+
+This error is returned when a request exceeds 10 redirects.

@@ -1,0 +1,572 @@
+---
+title: 'Cookie Management'
+description: 'Cookie jar operations, parsing, and custom extraction'
+---
+
+## Overview
+
+The client package provides advanced cookie management with support for non-standard cookie values, custom extraction, and flexible cookie manipulation.
+
+## CookieJar Type
+
+```go
+type CookieJar struct {
+    // Internal fields
+}
+```
+
+CookieJar is a cookie jar that accepts cookie values containing double-quote characters. It wraps the standard library's cookiejar with relaxed validation.
+
+**Implements:** `http.CookieJar`
+
+**Source:** `/home/daytona/workspace/source/pkg/client/jar.go:14`
+
+### Methods
+
+#### SetCookies
+
+Stores cookies for the given URL.
+
+```go
+func (j *CookieJar) SetCookies(u *url.URL, cookies []*http.Cookie)
+```
+
+<ParamField path="u" type="*url.URL">
+  The URL to associate cookies with
+</ParamField>
+
+<ParamField path="cookies" type="[]*http.Cookie">
+  Slice of cookies to store
+</ParamField>
+
+Cookie values may contain double-quote characters that the standard library would reject.
+
+**Source:** `/home/daytona/workspace/source/pkg/client/jar.go:29`
+
+#### Cookies
+
+Returns the cookies for the given URL.
+
+```go
+func (j *CookieJar) Cookies(u *url.URL) []*http.Cookie
+```
+
+<ParamField path="u" type="*url.URL">
+  The URL to retrieve cookies for
+</ParamField>
+
+**Returns:** Slice of cookies applicable to the URL
+
+**Source:** `/home/daytona/workspace/source/pkg/client/jar.go:34`
+
+## Client Cookie Methods
+
+### SetCookies
+
+Stores cookies for the given URL in the client's jar.
+
+```go
+func (c *Client) SetCookies(u *url.URL, cookies []*http.Cookie)
+```
+
+<ParamField path="u" type="*url.URL">
+  The URL to associate cookies with
+</ParamField>
+
+<ParamField path="cookies" type="[]*http.Cookie">
+  Slice of cookies to store
+</ParamField>
+
+**Example:**
+```go
+u, _ := url.Parse("https://example.com")
+cookies := []*http.Cookie{
+    {Name: "session", Value: "abc123"},
+    {Name: "preference", Value: "dark_mode"},
+}
+c.SetCookies(u, cookies)
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/client.go:261`
+
+### SetCookieString
+
+Sets cookies with a specific domain for subdomain sharing.
+
+```go
+func (c *Client) SetCookieString(domain string, cookieString string, exclude ...string) error
+```
+
+<ParamField path="domain" type="string">
+  Domain for the cookies, should include leading dot (e.g., ".uber.com")
+</ParamField>
+
+<ParamField path="cookieString" type="string">
+  Semicolon-separated cookie string or JSON array format
+</ParamField>
+
+<ParamField path="exclude" type="...string">
+  Optional cookie names to exclude from setting
+</ParamField>
+
+**Returns:** Error if parsing fails
+
+**Behavior:**
+- Parses cookie string using `ParseCookies`
+- Filters out excluded cookie names
+- Skips cookies that already exist with the same value
+- Sets domain to provided value (strips "www" prefix)
+
+**Example:**
+```go
+err := c.SetCookieString(".example.com", "session=abc123; user=john", "user")
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/client.go:272`
+
+### GetCookies
+
+Returns cookies for the given domain.
+
+```go
+func (c *Client) GetCookies(domain string) []*http.Cookie
+```
+
+<ParamField path="domain" type="string">
+  Domain to retrieve cookies for (with or without leading dot)
+</ParamField>
+
+**Returns:** Slice of cookies for the domain
+
+**Behavior:**
+- If domain starts with ".", prepends "www" for URL construction
+- Uses HTTPS scheme
+
+**Example:**
+```go
+cookies := c.GetCookies("example.com")
+for _, cookie := range cookies {
+    fmt.Printf("%s=%s\n", cookie.Name, cookie.Value)
+}
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/client.go:327`
+
+### GetCookieString
+
+Returns cookies for the given domain as a semicolon-separated string.
+
+```go
+func (c *Client) GetCookieString(domain string) string
+```
+
+<ParamField path="domain" type="string">
+  Domain to retrieve cookies for
+</ParamField>
+
+**Returns:** Cookie string in "name=value; name2=value2" format
+
+**Example:**
+```go
+cookieStr := c.GetCookieString("example.com")
+fmt.Println(cookieStr)
+// Output: session=abc123; preference=dark_mode
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/client.go:339`
+
+### FindCookie
+
+Returns the first cookie matching name for the given domain.
+
+```go
+func (c *Client) FindCookie(name string, domain string) (*http.Cookie, bool)
+```
+
+<ParamField path="name" type="string">
+  Cookie name to search for (case-insensitive)
+</ParamField>
+
+<ParamField path="domain" type="string">
+  Domain to search in
+</ParamField>
+
+**Returns:** Cookie pointer and true if found, nil and false otherwise
+
+**Example:**
+```go
+if cookie, ok := c.FindCookie("session", "example.com"); ok {
+    fmt.Printf("Found: %s=%s\n", cookie.Name, cookie.Value)
+} else {
+    fmt.Println("Cookie not found")
+}
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/client.go:312`
+
+### ClearCookies
+
+Clears all cookies by creating a new jar.
+
+```go
+func (c *Client) ClearCookies() error
+```
+
+**Returns:** Error if jar creation fails
+
+**Example:**
+```go
+if err := c.ClearCookies(); err != nil {
+    log.Fatal(err)
+}
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/client.go:354`
+
+## Cookie Parsing Functions
+
+### ParseCookies
+
+Parses a raw cookie string into an http.Cookie slice.
+
+```go
+func ParseCookies(cookieStr string) []*http.Cookie
+```
+
+<ParamField path="cookieStr" type="string">
+  Cookie string in "name=value; name2=value2" format or JSON array
+</ParamField>
+
+**Returns:** Slice of parsed cookies
+
+**Supported Formats:**
+1. Semicolon-separated: `"session=abc123; user=john; preference=dark_mode"`
+2. JSON array: `'[{"Name":"session","Value":"abc123"},{"Name":"user","Value":"john"}]'`
+
+**Example:**
+```go
+cookies := client.ParseCookies("session=abc123; user=john")
+for _, cookie := range cookies {
+    fmt.Printf("%s=%s\n", cookie.Name, cookie.Value)
+}
+// Output:
+// session=abc123
+// user=john
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/cookie.go:35`
+
+### ParseSetCookie
+
+Parses a single Set-Cookie header line using relaxed validation.
+
+```go
+func ParseSetCookie(line string) (*http.Cookie, error)
+```
+
+<ParamField path="line" type="string">
+  Raw Set-Cookie header value
+</ParamField>
+
+**Returns:** Parsed cookie or error
+
+**Relaxed Validation:**
+- Allows double-quote characters in cookie values
+- Accepts values with bytes from 0x20 to 0x7f (excluding `;` and `\`)
+
+**Supported Attributes:**
+- `Domain`
+- `Path`
+- `Expires` (RFC1123 or "Mon, 02-Jan-2006 15:04:05 MST" format)
+- `Max-Age`
+- `SameSite` (Lax, Strict, None)
+- `Secure`
+- `HttpOnly`
+- `Partitioned`
+
+**Example:**
+```go
+raw := `session=abc123; Domain=.example.com; Path=/; Secure; HttpOnly; SameSite=Lax`
+cookie, err := client.ParseSetCookie(raw)
+if err != nil {
+    log.Fatal(err)
+}
+
+fmt.Printf("Name: %s\n", cookie.Name)
+fmt.Printf("Value: %s\n", cookie.Value)
+fmt.Printf("Domain: %s\n", cookie.Domain)
+fmt.Printf("Secure: %v\n", cookie.Secure)
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/cookie.go:70`
+
+### GetCookieByName
+
+Finds a cookie by name from a cookie string.
+
+```go
+func GetCookieByName(cookieStr, name string) *http.Cookie
+```
+
+<ParamField path="cookieStr" type="string">
+  Cookie string to search in
+</ParamField>
+
+<ParamField path="name" type="string">
+  Cookie name to find
+</ParamField>
+
+**Returns:** Cookie pointer if found, nil otherwise
+
+**Example:**
+```go
+cookieStr := "session=abc123; user=john; preference=dark_mode"
+cookie := client.GetCookieByName(cookieStr, "user")
+if cookie != nil {
+    fmt.Printf("Value: %s\n", cookie.Value) // Output: Value: john
+}
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/cookie.go:175`
+
+## Cookie Extraction
+
+### CookieExtractor Type
+
+```go
+type CookieExtractor func(resp *http.Response) ([]*http.Cookie, error)
+```
+
+CookieExtractor extracts cookies from an HTTP response. Called after each round trip, including intermediate redirects. The returned cookies are stored in the client's jar.
+
+**Source:** `/home/daytona/workspace/source/pkg/client/cookie.go:15`
+
+### DefaultCookieExtractor
+
+Parses standard Set-Cookie response headers using relaxed parsing.
+
+```go
+func DefaultCookieExtractor(resp *http.Response) ([]*http.Cookie, error)
+```
+
+<ParamField path="resp" type="*http.Response">
+  HTTP response to extract cookies from
+</ParamField>
+
+**Returns:** Slice of cookies and error if parsing fails
+
+**Behavior:**
+- Reads all `Set-Cookie` headers from response
+- Parses each using `ParseSetCookie` with relaxed validation
+- Returns error if any cookie fails to parse
+
+**Source:** `/home/daytona/workspace/source/pkg/client/cookie.go:19`
+
+### Custom Cookie Extractor
+
+You can provide a custom cookie extractor using `WithCookieExtractor`:
+
+```go
+customExtractor := func(resp *http.Response) ([]*http.Cookie, error) {
+    var cookies []*http.Cookie
+    
+    // Extract from Set-Cookie headers
+    for _, raw := range resp.Header.Values("Set-Cookie") {
+        cookie, err := client.ParseSetCookie(raw)
+        if err != nil {
+            // Skip invalid cookies instead of returning error
+            log.Printf("Skipping invalid cookie: %v", err)
+            continue
+        }
+        cookies = append(cookies, cookie)
+    }
+    
+    // Also extract from custom header
+    if customCookies := resp.Header.Get("X-Custom-Cookies"); customCookies != "" {
+        parsed := client.ParseCookies(customCookies)
+        cookies = append(cookies, parsed...)
+    }
+    
+    return cookies, nil
+}
+
+c, _ := client.New(
+    client.WithCookieExtractor(customExtractor),
+)
+```
+
+## Usage Examples
+
+### Basic Cookie Management
+
+```go
+c, _ := client.New()
+
+// Set cookies manually
+u, _ := url.Parse("https://example.com")
+cookies := []*http.Cookie{
+    {Name: "session", Value: "abc123", Domain: ".example.com"},
+    {Name: "preference", Value: "dark_mode"},
+}
+c.SetCookies(u, cookies)
+
+// Retrieve cookies
+stored := c.GetCookies("example.com")
+fmt.Printf("Stored %d cookies\n", len(stored))
+
+// Get as string
+cookieStr := c.GetCookieString("example.com")
+fmt.Println(cookieStr) // Output: session=abc123; preference=dark_mode
+
+// Find specific cookie
+if session, ok := c.FindCookie("session", "example.com"); ok {
+    fmt.Printf("Session: %s\n", session.Value)
+}
+```
+
+### Setting Cookies from String
+
+```go
+c, _ := client.New()
+
+// Simple format
+err := c.SetCookieString(".example.com", "session=abc123; user=john")
+if err != nil {
+    log.Fatal(err)
+}
+
+// JSON format
+jsonCookies := `[{"Name":"session","Value":"xyz789"},{"Name":"theme","Value":"dark"}]`
+err = c.SetCookieString(".example.com", jsonCookies)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Exclude specific cookies
+err = c.SetCookieString(".example.com", "session=new; user=admin", "user")
+// Only sets session=new, excludes user=admin
+```
+
+### Automatic Cookie Handling
+
+```go
+c, _ := client.New()
+
+// First request - server sets cookies
+req1, _ := http.NewRequest("GET", "https://example.com/login", nil)
+resp1, _ := c.Do(req1)
+resp1.Body.Close()
+
+// Cookies are automatically extracted and stored
+
+// Second request - cookies are automatically sent
+req2, _ := http.NewRequest("GET", "https://example.com/dashboard", nil)
+resp2, _ := c.Do(req2)
+defer resp2.Body.Close()
+
+// Check what cookies were sent
+fmt.Println("Cookies sent:", req2.Header.Get("Cookie"))
+```
+
+### Handling Redirects with Cookies
+
+```go
+c, _ := client.New()
+
+req, _ := http.NewRequest("POST", "https://example.com/login", strings.NewReader("user=john&pass=secret"))
+resp, _ := c.Do(req)
+defer resp.Body.Close()
+
+// Client automatically:
+// 1. Extracts cookies from redirect responses
+// 2. Applies them to subsequent redirect requests
+// 3. Stores final cookies in jar
+
+cookies := c.GetCookies("example.com")
+fmt.Printf("Final cookies: %d\n", len(cookies))
+```
+
+### Parsing Non-Standard Cookies
+
+```go
+// Cookie with double quotes (rejected by standard library)
+raw := `token="abc\"def\""; Domain=.example.com; Secure`
+cookie, err := client.ParseSetCookie(raw)
+if err != nil {
+    log.Fatal(err)
+}
+
+fmt.Printf("Name: %s\n", cookie.Name)     // token
+fmt.Printf("Value: %s\n", cookie.Value)   // abc"def"
+fmt.Printf("Quoted: %v\n", cookie.Quoted) // true
+fmt.Printf("Secure: %v\n", cookie.Secure) // true
+```
+
+### Clearing and Resetting Cookies
+
+```go
+c, _ := client.New()
+
+// Make requests that set cookies
+req1, _ := http.NewRequest("GET", "https://example.com", nil)
+c.Do(req1)
+
+fmt.Println("Before clear:", len(c.GetCookies("example.com")))
+
+// Clear all cookies
+if err := c.ClearCookies(); err != nil {
+    log.Fatal(err)
+}
+
+fmt.Println("After clear:", len(c.GetCookies("example.com"))) // 0
+```
+
+### Cookie Sharing Across Subdomains
+
+```go
+c, _ := client.New()
+
+// Set cookie for parent domain
+err := c.SetCookieString(".example.com", "shared=value123")
+if err != nil {
+    log.Fatal(err)
+}
+
+// Cookie is available on subdomains
+req1, _ := http.NewRequest("GET", "https://api.example.com", nil)
+resp1, _ := c.Do(req1)
+fmt.Println("API cookies:", req1.Header.Get("Cookie"))
+
+req2, _ := http.NewRequest("GET", "https://www.example.com", nil)
+resp2, _ := c.Do(req2)
+fmt.Println("WWW cookies:", req2.Header.Get("Cookie"))
+
+// Both requests include: shared=value123
+```
+
+## Implementation Details
+
+### Cookie Persistence During Redirects
+
+The client manually follows redirects to ensure cookies are properly handled:
+
+1. Before each request, cookies are retrieved from jar and set in Cookie header
+2. After each response (including redirects), Set-Cookie headers are extracted
+3. Extracted cookies are stored in jar
+4. Process repeats for redirect requests
+
+**Source:** `/home/daytona/workspace/source/pkg/client/client.go:115`
+
+### Relaxed Cookie Validation
+
+The `validCookieValueByte` function allows:
+- All printable ASCII characters (0x20 to 0x7f)
+- Including double-quote characters (`"`)
+- Excluding semicolon (`;`) and backslash (`\`)
+
+This is more permissive than the standard library's validation.
+
+**Source:** `/home/daytona/workspace/source/pkg/client/cookie.go:187`

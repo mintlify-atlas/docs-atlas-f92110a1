@@ -1,0 +1,466 @@
+---
+title: 'Retry'
+description: 'Generic retry loop with exponential backoff and full jitter'
+---
+
+The `retry` package provides a generic retry mechanism with exponential backoff and full jitter for handling transient errors in distributed systems.
+
+## Installation
+
+```go
+import "github.com/aarock1234/go-template/pkg/retry"
+```
+
+## Quick Start
+
+Retry an operation with default settings:
+
+```go
+package main
+
+import (
+    "context"
+    "errors"
+    "fmt"
+    
+    "github.com/aarock1234/go-template/pkg/retry"
+)
+
+func main() {
+    ctx := context.Background()
+    
+    err := retry.Do(ctx, func(ctx context.Context) error {
+        // Your operation that might fail
+        return doSomething()
+    })
+    
+    if err != nil {
+        fmt.Println("Failed after retries:", err)
+    }
+}
+```
+
+## Core Function
+
+### Do
+
+Retries a function until it succeeds, the context is cancelled, or max attempts is reached.
+
+```go
+func Do(ctx context.Context, fn func(ctx context.Context) error, opts ...Option) error
+```
+
+<ParamField path="ctx" type="context.Context">
+  Context for cancellation and timeout control
+</ParamField>
+
+<ParamField path="fn" type="func(ctx context.Context) error">
+  Function to retry. Return nil on success, error to retry
+</ParamField>
+
+<ParamField path="opts" type="...Option">
+  Optional configuration options
+</ParamField>
+
+**Behavior:**
+- Calls `fn` until it returns nil
+- Sleeps between attempts with exponential backoff and full jitter
+- Returns immediately on context cancellation
+- Returns the last error if max attempts reached
+
+**Backoff Formula:**
+```
+sleep = rand([0, min(initialDelay * multiplier^attempt, maxDelay)])
+```
+
+## Configuration Options
+
+### WithMaxAttempts
+
+Sets the maximum number of attempts (including the first).
+
+```go
+func WithMaxAttempts(n int) Option
+```
+
+<ParamField path="n" type="int">
+  Maximum number of attempts. A value of 1 means no retries. Default: 3
+</ParamField>
+
+**Example:**
+
+```go
+err := retry.Do(ctx, fn,
+    retry.WithMaxAttempts(5), // Try up to 5 times
+)
+```
+
+### WithInitialDelay
+
+Sets the base delay before the first retry.
+
+```go
+func WithInitialDelay(d time.Duration) Option
+```
+
+<ParamField path="d" type="time.Duration">
+  Initial delay duration. Default: 1 second
+</ParamField>
+
+**Example:**
+
+```go
+err := retry.Do(ctx, fn,
+    retry.WithInitialDelay(500 * time.Millisecond),
+)
+```
+
+### WithMaxDelay
+
+Caps the maximum backoff delay.
+
+```go
+func WithMaxDelay(d time.Duration) Option
+```
+
+<ParamField path="d" type="time.Duration">
+  Maximum delay between retries. Default: 10 seconds
+</ParamField>
+
+**Example:**
+
+```go
+err := retry.Do(ctx, fn,
+    retry.WithMaxDelay(30 * time.Second),
+)
+```
+
+### WithMultiplier
+
+Sets the exponential growth factor.
+
+```go
+func WithMultiplier(m float64) Option
+```
+
+<ParamField path="m" type="float64">
+  Exponential backoff multiplier. Default: 2.0
+</ParamField>
+
+**Example:**
+
+```go
+err := retry.Do(ctx, fn,
+    retry.WithMultiplier(1.5), // 50% increase per attempt
+)
+```
+
+## Default Configuration
+
+When no options are provided:
+
+```go
+maxAttempts:  3              // Try up to 3 times
+initialDelay: 1 * time.Second // Start with 1s delay
+maxDelay:     10 * time.Second // Cap at 10s
+multiplier:   2.0             // Double each time
+```
+
+## Usage Examples
+
+### HTTP Request with Retry
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "net/http"
+    "time"
+    
+    "github.com/aarock1234/go-template/pkg/retry"
+)
+
+func fetchData(url string) error {
+    ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+    defer cancel()
+    
+    return retry.Do(ctx, func(ctx context.Context) error {
+        req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+        if err != nil {
+            return err
+        }
+        
+        resp, err := http.DefaultClient.Do(req)
+        if err != nil {
+            return err // Retry on network error
+        }
+        defer resp.Body.Close()
+        
+        if resp.StatusCode >= 500 {
+            return fmt.Errorf("server error: %d", resp.StatusCode)
+        }
+        
+        if resp.StatusCode >= 400 {
+            // Don't retry client errors
+            return nil
+        }
+        
+        return nil
+    },
+        retry.WithMaxAttempts(5),
+        retry.WithInitialDelay(500*time.Millisecond),
+    )
+}
+```
+
+### Database Connection with Retry
+
+```go
+import (
+    "context"
+    "database/sql"
+    "time"
+    
+    "github.com/aarock1234/go-template/pkg/retry"
+)
+
+func connectDB(dsn string) (*sql.DB, error) {
+    var db *sql.DB
+    
+    err := retry.Do(context.Background(), func(ctx context.Context) error {
+        var err error
+        db, err = sql.Open("postgres", dsn)
+        if err != nil {
+            return err
+        }
+        
+        return db.PingContext(ctx)
+    },
+        retry.WithMaxAttempts(10),
+        retry.WithInitialDelay(1*time.Second),
+        retry.WithMaxDelay(30*time.Second),
+    )
+    
+    return db, err
+}
+```
+
+### Custom Backoff Strategy
+
+```go
+import (
+    "context"
+    "time"
+    
+    "github.com/aarock1234/go-template/pkg/retry"
+)
+
+func retryWithCustomBackoff() error {
+    ctx := context.Background()
+    
+    return retry.Do(ctx, func(ctx context.Context) error {
+        // Your operation
+        return doOperation()
+    },
+        retry.WithMaxAttempts(8),          // More attempts
+        retry.WithInitialDelay(100*time.Millisecond), // Start small
+        retry.WithMaxDelay(1*time.Minute),  // Allow longer waits
+        retry.WithMultiplier(3.0),          // Aggressive backoff
+    )
+}
+```
+
+### Context Cancellation
+
+```go
+import (
+    "context"
+    "time"
+    
+    "github.com/aarock1234/go-template/pkg/retry"
+)
+
+func retryWithTimeout() error {
+    // Retry with overall timeout
+    ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+    defer cancel()
+    
+    return retry.Do(ctx, func(ctx context.Context) error {
+        select {
+        case <-ctx.Done():
+            return ctx.Err() // Stop retrying on timeout
+        default:
+            return performOperation()
+        }
+    },
+        retry.WithMaxAttempts(100), // Will stop when timeout hits
+    )
+}
+```
+
+### Conditional Retry
+
+```go
+import (
+    "context"
+    "errors"
+    "net"
+    
+    "github.com/aarock1234/go-template/pkg/retry"
+)
+
+var ErrPermanent = errors.New("permanent failure")
+
+func retryOnlyTransientErrors() error {
+    return retry.Do(context.Background(), func(ctx context.Context) error {
+        err := callExternalAPI()
+        if err == nil {
+            return nil
+        }
+        
+        // Don't retry permanent errors
+        if errors.Is(err, ErrPermanent) {
+            return nil // Return nil to stop retrying
+        }
+        
+        // Retry on network errors
+        var netErr net.Error
+        if errors.As(err, &netErr) && netErr.Timeout() {
+            return err
+        }
+        
+        return err
+    })
+}
+```
+
+## Error Handling
+
+The `Do` function returns different errors based on the failure mode:
+
+**Max Attempts Reached:**
+```go
+err := retry.Do(ctx, fn)
+// Returns: "after 3 attempts: <last error>"
+```
+
+**Context Cancelled:**
+```go
+ctx, cancel := context.WithCancel(context.Background())
+cancel() // Cancel immediately
+
+err := retry.Do(ctx, fn)
+// Returns: context.Canceled
+```
+
+**Context Timeout:**
+```go
+ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+defer cancel()
+
+err := retry.Do(ctx, fn)
+// Returns: context.DeadlineExceeded
+```
+
+## Backoff Behavior
+
+The package uses exponential backoff with full jitter:
+
+**Attempt 1:** No delay (immediate)
+
+**Attempt 2:** Random delay in `[0, initialDelay]`
+- With default 1s initial delay: 0-1s
+
+**Attempt 3:** Random delay in `[0, initialDelay * multiplier]`
+- With default settings: 0-2s
+
+**Attempt 4:** Random delay in `[0, initialDelay * multiplier²]`
+- With default settings: 0-4s (capped at maxDelay)
+
+**Full jitter** prevents thundering herd problems where many clients retry simultaneously.
+
+## Best Practices
+
+<Tip>
+  **Choose appropriate retry counts:** Start with 3-5 attempts for most operations. Use higher counts for critical operations or when connecting to unreliable services.
+</Tip>
+
+<Warning>
+  **Respect context cancellation:** Always check `ctx.Done()` inside long-running operations to ensure they can be cancelled promptly.
+</Warning>
+
+<Tip>
+  **Don't retry everything:** Some errors are permanent (like 400 Bad Request). Return nil from your function to stop retrying when you detect a permanent error.
+</Tip>
+
+<Tip>
+  **Use appropriate initial delays:** For network operations, 100-500ms is usually sufficient. For database connections, 1-2s is common.
+</Tip>
+
+## Complete Example
+
+```go
+package main
+
+import (
+    "context"
+    "errors"
+    "fmt"
+    "log"
+    "net/http"
+    "time"
+    
+    "github.com/aarock1234/go-template/pkg/retry"
+)
+
+func main() {
+    ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+    defer cancel()
+    
+    var attempts int
+    
+    err := retry.Do(ctx, func(ctx context.Context) error {
+        attempts++
+        log.Printf("Attempt %d", attempts)
+        
+        req, err := http.NewRequestWithContext(ctx, "GET", "https://api.example.com/data", nil)
+        if err != nil {
+            return fmt.Errorf("creating request: %w", err)
+        }
+        
+        resp, err := http.DefaultClient.Do(req)
+        if err != nil {
+            return fmt.Errorf("executing request: %w", err)
+        }
+        defer resp.Body.Close()
+        
+        switch {
+        case resp.StatusCode >= 500:
+            // Retry server errors
+            return fmt.Errorf("server error: %d", resp.StatusCode)
+        case resp.StatusCode >= 400:
+            // Don't retry client errors
+            return nil
+        case resp.StatusCode >= 200 && resp.StatusCode < 300:
+            log.Printf("Success on attempt %d", attempts)
+            return nil
+        default:
+            return fmt.Errorf("unexpected status: %d", resp.StatusCode)
+        }
+    },
+        retry.WithMaxAttempts(5),
+        retry.WithInitialDelay(500*time.Millisecond),
+        retry.WithMaxDelay(10*time.Second),
+        retry.WithMultiplier(2.0),
+    )
+    
+    if err != nil {
+        if errors.Is(err, context.DeadlineExceeded) {
+            log.Fatal("Operation timed out after retries")
+        }
+        log.Fatalf("Failed after %d attempts: %v", attempts, err)
+    }
+}
+```

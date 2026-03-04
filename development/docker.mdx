@@ -1,0 +1,272 @@
+---
+title: Docker Development
+description: Run the Go Template project with Docker Compose for containerized development
+---
+
+The Go Template includes a Docker setup with hot reload capabilities for efficient containerized development.
+
+## Docker Setup Overview
+
+The project includes:
+- **Multi-stage Dockerfile** with dev, builder, and production targets
+- **Docker Compose** configuration with hot reload support
+- **PostgreSQL service** with health checks
+- **Development mode** with full Go toolchain
+
+## Dockerfile Stages
+
+The `Dockerfile` uses a multi-stage build with three targets:
+
+### Dev Stage
+
+Based on `golang:1.26`, includes the full Go toolchain for development:
+
+```dockerfile
+FROM golang:1.26 AS dev
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
+COPY . .
+```
+
+This stage is used by Docker Compose for local development with hot reload.
+
+### Builder Stage
+
+Compiles the binary with optimizations:
+
+```dockerfile
+FROM dev AS builder
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /bin/template ./cmd/template
+```
+
+### Production Stage
+
+Minimal Alpine-based image for deployment:
+
+```dockerfile
+FROM alpine:3.23 AS production
+RUN apk add --no-cache ca-certificates tzdata
+COPY --from=builder /bin/template /bin/template
+ENTRYPOINT ["/bin/template"]
+```
+
+## Docker Compose Configuration
+
+The `compose.yaml` defines two services:
+
+### App Service
+
+```yaml
+services:
+  app:
+    build:
+      context: .
+      target: dev
+    env_file:
+      - .env
+    develop:
+      watch:
+        - action: rebuild
+          path: .
+          ignore:
+            - .git/
+            - .llm/
+```
+
+The app service:
+- Builds using the `dev` target
+- Loads environment variables from `.env`
+- Supports hot reload via Docker Compose watch
+- Ignores `.git/` and `.llm/` directories during sync
+
+### PostgreSQL Service
+
+```yaml
+postgres:
+  profiles:
+    - postgres
+  image: postgres:18-alpine
+  environment:
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+    POSTGRES_DB: app
+  ports:
+    - "5432:5432"
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U postgres -d app"]
+    interval: 5s
+    timeout: 5s
+    retries: 5
+```
+
+The PostgreSQL service:
+- Uses the `postgres` profile (opt-in)
+- Runs PostgreSQL 18 on Alpine Linux
+- Exposes port 5432 to the host
+- Includes health checks for container orchestration
+
+## Running with Docker
+
+### Start Full Stack
+
+Start both the application and PostgreSQL:
+
+<Steps>
+  <Step title="Ensure .env is configured">
+    Copy and configure your environment file:
+    
+    ```bash
+    cp .env.example .env
+    ```
+  </Step>
+
+  <Step title="Start all services">
+    ```bash
+    make up
+    ```
+    
+    This runs `docker compose --profile postgres up -d` which:
+    - Builds the app container (dev stage)
+    - Starts PostgreSQL with the postgres profile
+    - Runs both services in detached mode
+  </Step>
+
+  <Step title="View logs">
+    Check application logs:
+    
+    ```bash
+    docker compose logs -f app
+    ```
+    
+    Check PostgreSQL logs:
+    
+    ```bash
+    docker compose logs -f postgres
+    ```
+  </Step>
+</Steps>
+
+### Hot Reload with Docker Compose Watch
+
+For active development with automatic rebuilds:
+
+```bash
+make watch
+```
+
+This enables Docker Compose's watch mode:
+- Monitors your source code for changes
+- Automatically rebuilds the container on file changes
+- Restarts the application with your updates
+- Ignores `.git/` and `.llm/` directories
+
+<Note>
+  The watch action is `rebuild`, which means the container is rebuilt on changes. For faster iteration, consider running the app locally with `make dev` instead.
+</Note>
+
+### Stop Services
+
+Stop and remove all containers:
+
+```bash
+make down
+```
+
+## Docker Commands Reference
+
+| Command | Description |
+|---------|-------------|
+| `make up` | Start full stack (app + postgres) |
+| `make down` | Stop all services |
+| `make watch` | Hot reload via docker compose watch |
+
+## Database-Only Mode
+
+If you prefer to run the application locally but use Docker for PostgreSQL:
+
+<Steps>
+  <Step title="Start PostgreSQL only">
+    ```bash
+    make db
+    ```
+    
+    This starts just the PostgreSQL container on `localhost:5432`.
+  </Step>
+
+  <Step title="Run the app locally">
+    ```bash
+    make dev
+    ```
+    
+    The app will connect to PostgreSQL on `localhost:5432` using the `DATABASE_URL` from your `.env` file.
+  </Step>
+
+  <Step title="Stop PostgreSQL">
+    ```bash
+    make db-down
+    ```
+  </Step>
+</Steps>
+
+## Building for Production
+
+Build the production image:
+
+```bash
+docker build --target production -t myapp:latest .
+```
+
+Run the production container:
+
+```bash
+docker run --env-file .env myapp:latest
+```
+
+The production image:
+- Is based on Alpine Linux (~10MB base)
+- Contains only the compiled binary and essential certificates
+- Has no development tools or source code
+- Uses `CGO_ENABLED=0` for static linking
+
+## Troubleshooting
+
+### Container won't start
+
+Check logs for errors:
+
+```bash
+docker compose logs app
+```
+
+### Database connection issues
+
+Verify PostgreSQL is healthy:
+
+```bash
+docker compose ps postgres
+```
+
+Check the health status and ensure the `DATABASE_URL` in `.env` matches the container configuration.
+
+### Hot reload not working
+
+Ensure you're using Docker Compose with watch support (v2.22+):
+
+```bash
+docker compose version
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Database Setup" icon="database" href="/development/database">
+    Learn about migrations and sqlc
+  </Card>
+  <Card title="Testing" icon="flask" href="/development/testing">
+    Run tests in Docker
+  </Card>
+</CardGroup>

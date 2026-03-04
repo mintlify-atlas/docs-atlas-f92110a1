@@ -1,0 +1,382 @@
+---
+title: "cycle"
+description: "Thread-safe round-robin line rotator backed by a file"
+---
+
+The `cycle` package provides a thread-safe round-robin line rotator backed by a file on disk. It reads lines from a file and serves them in circular rotation order, useful for load balancing, proxy rotation, or any scenario requiring sequential item distribution.
+
+## Types
+
+### FileRotator
+
+```go
+type FileRotator struct {
+    // contains filtered or unexported fields
+}
+```
+
+Reads lines from a file and serves them in round-robin order. All methods are safe for concurrent use.
+
+**Internal State:**
+- Maintains current rotation index
+- Caches all lines in memory
+- Thread-safe with RWMutex protection
+- Includes structured logger for debugging
+
+## Functions
+
+### NewFileRotator
+
+```go
+func NewFileRotator(filePath string) (*FileRotator, error)
+```
+
+Creates a FileRotator that reads lines from the specified file path. The file is read immediately and lines are cached in memory.
+
+<ParamField path="filePath" type="string" required>
+  Path to the file containing lines to rotate. Can be relative or absolute. Empty lines and whitespace-only lines are ignored.
+</ParamField>
+
+**Returns:** `(*FileRotator, error)` - A new FileRotator instance or an error if the file cannot be read.
+
+**Example:**
+
+```go
+package main
+
+import (
+    "log"
+    "github.com/aarock1234/go-template/pkg/cycle"
+)
+
+func main() {
+    // Create rotator from proxy list
+    rotator, err := cycle.NewFileRotator("proxies.txt")
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Use the rotator
+    for i := 0; i < 5; i++ {
+        proxy := rotator.Next()
+        log.Printf("Using proxy: %s", proxy)
+    }
+}
+```
+
+**Example file (proxies.txt):**
+
+```
+192.168.1.1:8080
+192.168.1.2:8080
+192.168.1.3:8080
+
+# Empty lines and comments are ignored
+192.168.1.4:8080
+```
+
+## Methods
+
+### Next
+
+```go
+func (r *FileRotator) Next() string
+```
+
+Returns the next line in round-robin order. After reaching the last line, it wraps around to the first line. Returns an empty string if the rotator has no lines.
+
+**Returns:** `string` - The next line in rotation, or empty string if no lines are loaded.
+
+**Thread Safety:** Safe for concurrent calls. Multiple goroutines can call Next() simultaneously.
+
+**Example:**
+
+```go
+rotator, _ := cycle.NewFileRotator("servers.txt")
+
+// Get next server in rotation
+server1 := rotator.Next() // "server-1.example.com"
+server2 := rotator.Next() // "server-2.example.com"
+server3 := rotator.Next() // "server-3.example.com"
+server4 := rotator.Next() // "server-1.example.com" (wraps around)
+```
+
+**Concurrent Usage:**
+
+```go
+rotator, _ := cycle.NewFileRotator("proxies.txt")
+
+// Safe to use from multiple goroutines
+for i := 0; i < 10; i++ {
+    go func() {
+        proxy := rotator.Next()
+        makeRequest(proxy)
+    }()
+}
+```
+
+### Count
+
+```go
+func (r *FileRotator) Count() int
+```
+
+Returns the number of lines loaded from the file. Empty lines and whitespace-only lines are not counted.
+
+**Returns:** `int` - The total number of valid lines in the rotator.
+
+**Thread Safety:** Safe for concurrent calls.
+
+**Example:**
+
+```go
+rotator, _ := cycle.NewFileRotator("items.txt")
+
+count := rotator.Count()
+log.Printf("Loaded %d items", count)
+
+if count == 0 {
+    log.Fatal("No items loaded")
+}
+```
+
+### Reset
+
+```go
+func (r *FileRotator) Reset()
+```
+
+Moves the rotation index back to the first line. The next call to `Next()` will return the first line.
+
+**Thread Safety:** Safe for concurrent calls, but may cause unexpected behavior if other goroutines are actively calling `Next()`.
+
+**Example:**
+
+```go
+rotator, _ := cycle.NewFileRotator("sequence.txt")
+
+rotator.Next() // "item-1"
+rotator.Next() // "item-2"
+rotator.Next() // "item-3"
+
+// Reset to start
+rotator.Reset()
+
+rotator.Next() // "item-1" (back to beginning)
+```
+
+### Reload
+
+```go
+func (r *FileRotator) Reload() error
+```
+
+Re-reads the file from disk, replacing the current line set. The rotation index is not reset - it continues from its current position (adjusted if the new file has fewer lines).
+
+**Returns:** `error` - Returns an error if the file cannot be read.
+
+**Thread Safety:** Safe for concurrent calls, but may cause brief inconsistency during reload.
+
+**Use Cases:**
+- Dynamic configuration updates
+- Hot-reloading of proxy lists
+- Responding to file changes without restarting
+
+**Example:**
+
+```go
+rotator, _ := cycle.NewFileRotator("config.txt")
+
+// Use rotator...
+for i := 0; i < 100; i++ {
+    item := rotator.Next()
+    process(item)
+}
+
+// Reload from disk (e.g., after file update)
+if err := rotator.Reload(); err != nil {
+    log.Printf("Failed to reload: %v", err)
+}
+
+// Continue with new content
+for i := 0; i < 100; i++ {
+    item := rotator.Next()
+    process(item)
+}
+```
+
+**With File Watcher:**
+
+```go
+import (
+    "github.com/fsnotify/fsnotify"
+    "github.com/aarock1234/go-template/pkg/cycle"
+)
+
+func watchAndReload(rotator *cycle.FileRotator, path string) {
+    watcher, _ := fsnotify.NewWatcher()
+    defer watcher.Close()
+
+    watcher.Add(path)
+
+    for {
+        select {
+        case event := <-watcher.Events:
+            if event.Op&fsnotify.Write == fsnotify.Write {
+                if err := rotator.Reload(); err != nil {
+                    log.Printf("Reload failed: %v", err)
+                }
+            }
+        }
+    }
+}
+```
+
+## Usage Patterns
+
+### Load Balancing
+
+```go
+package main
+
+import (
+    "log"
+    "net/http"
+    "github.com/aarock1234/go-template/pkg/cycle"
+)
+
+var backends *cycle.FileRotator
+
+func init() {
+    var err error
+    backends, err = cycle.NewFileRotator("backends.txt")
+    if err != nil {
+        log.Fatal(err)
+    }
+}
+
+func proxyRequest(w http.ResponseWriter, r *http.Request) {
+    backend := backends.Next()
+    if backend == "" {
+        http.Error(w, "No backends available", http.StatusServiceUnavailable)
+        return
+    }
+
+    // Forward request to backend
+    log.Printf("Forwarding to: %s", backend)
+    // ... proxy logic
+}
+```
+
+### Proxy Rotation
+
+```go
+package main
+
+import (
+    "net/http"
+    "net/url"
+    "github.com/aarock1234/go-template/pkg/cycle"
+)
+
+type Scraper struct {
+    proxies *cycle.FileRotator
+}
+
+func NewScraper(proxyFile string) (*Scraper, error) {
+    proxies, err := cycle.NewFileRotator(proxyFile)
+    if err != nil {
+        return nil, err
+    }
+    return &Scraper{proxies: proxies}, nil
+}
+
+func (s *Scraper) Fetch(targetURL string) (*http.Response, error) {
+    proxyURL := s.proxies.Next()
+    if proxyURL == "" {
+        return nil, errors.New("no proxies available")
+    }
+
+    proxy, _ := url.Parse(proxyURL)
+    client := &http.Client{
+        Transport: &http.Transport{
+            Proxy: http.ProxyURL(proxy),
+        },
+    }
+
+    return client.Get(targetURL)
+}
+```
+
+### API Key Rotation
+
+```go
+package main
+
+import "github.com/aarock1234/go-template/pkg/cycle"
+
+type APIClient struct {
+    keys *cycle.FileRotator
+}
+
+func NewAPIClient(keyFile string) (*APIClient, error) {
+    keys, err := cycle.NewFileRotator(keyFile)
+    if err != nil {
+        return nil, err
+    }
+    return &APIClient{keys: keys}, nil
+}
+
+func (c *APIClient) MakeRequest() error {
+    apiKey := c.keys.Next()
+    // Use apiKey for request
+    return nil
+}
+```
+
+## File Format
+
+The FileRotator expects a plain text file with one item per line:
+
+```
+item-1
+item-2
+item-3
+```
+
+**Parsing Rules:**
+- One item per line
+- Empty lines are ignored
+- Whitespace is trimmed from both ends
+- Carriage returns (`\r`) are removed
+- No comment syntax (all non-empty lines are used)
+
+**Example:**
+
+```
+proxy1.example.com:8080
+  proxy2.example.com:8080  
+
+proxy3.example.com:8080
+
+  
+proxy4.example.com:8080
+```
+
+Results in 4 items: `proxy1.example.com:8080`, `proxy2.example.com:8080`, `proxy3.example.com:8080`, `proxy4.example.com:8080`
+
+## Logging
+
+The FileRotator includes structured logging (requires the `log` package):
+
+- **Debug level:** Individual rotation operations
+- **Info level:** File load operations with line counts
+- **Warn level:** Empty files or other non-fatal issues
+
+Set `LOG_LEVEL=debug` to see detailed rotation activity:
+
+```
+DEBUG creating new file rotator file=proxies.txt
+INFO loaded lines from file count=10 file=proxies.txt
+DEBUG returning next line line=192.168.1.1:8080 index=0 file=proxies.txt
+```

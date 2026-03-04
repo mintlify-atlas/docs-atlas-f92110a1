@@ -1,0 +1,336 @@
+---
+title: retry
+description: Generic retry loop with exponential backoff and full jitter for transient-error recovery
+---
+
+## Overview
+
+The `retry` package provides a robust retry mechanism with exponential backoff and full jitter, designed to gracefully handle transient errors in distributed systems. It supports context cancellation and flexible configuration options.
+
+## Import
+
+```go
+import "github.com/yourusername/gotemplate/pkg/retry"
+```
+
+## Functions
+
+### Do
+
+```go
+func Do(ctx context.Context, fn func(ctx context.Context) error, opts ...Option) error
+```
+
+Executes a function with automatic retry logic. It calls `fn` repeatedly until it returns `nil`, the context is cancelled, or `maxAttempts` is reached. Between attempts, it sleeps for an exponentially increasing duration with full jitter.
+
+<ParamField path="ctx" type="context.Context" required>
+  Context for cancellation and timeouts. When cancelled, Do returns immediately with `ctx.Err()`.
+</ParamField>
+
+<ParamField path="fn" type="func(ctx context.Context) error" required>
+  The function to execute and retry on error. Should return `nil` on success or an error to trigger a retry.
+</ParamField>
+
+<ParamField path="opts" type="...Option">
+  Optional configuration options to customize retry behavior (see Options section).
+</ParamField>
+
+**Returns:** `nil` if `fn` succeeds, `ctx.Err()` if context is cancelled, or a wrapped error after all attempts are exhausted.
+
+**Backoff Algorithm:** Between retries, sleeps for a randomized duration: `rand([0, min(initialDelay * multiplier^attempt, maxDelay)])`
+
+#### Example
+
+```go
+ctx := context.Background()
+
+err := retry.Do(ctx, func(ctx context.Context) error {
+    resp, err := http.Get("https://api.example.com/data")
+    if err != nil {
+        return err // Will retry
+    }
+    defer resp.Body.Close()
+    
+    if resp.StatusCode >= 500 {
+        return fmt.Errorf("server error: %d", resp.StatusCode) // Will retry
+    }
+    
+    return nil // Success
+}, retry.WithMaxAttempts(5), retry.WithInitialDelay(2*time.Second))
+
+if err != nil {
+    log.Fatalf("Failed after retries: %v", err)
+}
+```
+
+#### Example with Context Timeout
+
+```go
+ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+defer cancel()
+
+err := retry.Do(ctx, func(ctx context.Context) error {
+    return performDatabaseOperation(ctx)
+}, 
+    retry.WithMaxAttempts(10),
+    retry.WithInitialDelay(500*time.Millisecond),
+    retry.WithMaxDelay(5*time.Second),
+    retry.WithMultiplier(1.5),
+)
+
+if err != nil {
+    if errors.Is(err, context.DeadlineExceeded) {
+        log.Println("Operation timed out")
+    } else {
+        log.Printf("Operation failed: %v", err)
+    }
+}
+```
+
+## Options
+
+### WithMaxAttempts
+
+```go
+func WithMaxAttempts(n int) Option
+```
+
+Sets the maximum number of attempts (including the first execution). A value of `1` means no retries.
+
+<ParamField path="n" type="int" required>
+  Maximum number of attempts. Must be at least 1.
+</ParamField>
+
+**Default:** `3`
+
+#### Example
+
+```go
+// Retry up to 5 times total
+retry.Do(ctx, fn, retry.WithMaxAttempts(5))
+
+// No retries, execute once only
+retry.Do(ctx, fn, retry.WithMaxAttempts(1))
+```
+
+### WithInitialDelay
+
+```go
+func WithInitialDelay(d time.Duration) Option
+```
+
+Sets the base delay before the first retry. Subsequent delays grow exponentially from this base.
+
+<ParamField path="d" type="time.Duration" required>
+  Initial delay duration before the first retry.
+</ParamField>
+
+**Default:** `1 * time.Second`
+
+#### Example
+
+```go
+// Start with a 100ms delay
+retry.Do(ctx, fn, retry.WithInitialDelay(100*time.Millisecond))
+
+// Start with a 5 second delay
+retry.Do(ctx, fn, retry.WithInitialDelay(5*time.Second))
+```
+
+### WithMaxDelay
+
+```go
+func WithMaxDelay(d time.Duration) Option
+```
+
+Sets the maximum delay cap for backoff. Once the exponential delay exceeds this value, it will be clamped to `maxDelay`.
+
+<ParamField path="d" type="time.Duration" required>
+  Maximum delay duration between retries.
+</ParamField>
+
+**Default:** `10 * time.Second`
+
+#### Example
+
+```go
+// Cap delays at 30 seconds
+retry.Do(ctx, fn, retry.WithMaxDelay(30*time.Second))
+
+// Cap delays at 1 minute
+retry.Do(ctx, fn, retry.WithMaxDelay(time.Minute))
+```
+
+### WithMultiplier
+
+```go
+func WithMultiplier(m float64) Option
+```
+
+Sets the exponential growth factor for backoff delays. Each retry's delay is multiplied by this factor.
+
+<ParamField path="m" type="float64" required>
+  Exponential multiplier for delay growth. Common values are 1.5-3.0.
+</ParamField>
+
+**Default:** `2.0`
+
+#### Example
+
+```go
+// More aggressive backoff (doubles each time)
+retry.Do(ctx, fn, retry.WithMultiplier(2.0))
+
+// Gentler backoff (1.5x each time)
+retry.Do(ctx, fn, retry.WithMultiplier(1.5))
+
+// Very aggressive backoff (triples each time)
+retry.Do(ctx, fn, retry.WithMultiplier(3.0))
+```
+
+## Types
+
+### Option
+
+```go
+type Option func(*config)
+```
+
+A function type that configures retry behavior. Options are passed to `Do()` to customize retry parameters.
+
+## Constants
+
+The following default values are used when options are not explicitly provided:
+
+- **defaultMaxAttempts**: `3` - Maximum number of attempts
+- **defaultInitialDelay**: `1 * time.Second` - Base delay before first retry
+- **defaultMaxDelay**: `10 * time.Second` - Maximum delay cap
+- **defaultMultiplier**: `2.0` - Exponential growth factor
+
+## Complete Example
+
+```go
+package main
+
+import (
+    "context"
+    "errors"
+    "fmt"
+    "log"
+    "time"
+    
+    "github.com/yourusername/gotemplate/pkg/retry"
+)
+
+var ErrTransient = errors.New("transient error")
+
+func main() {
+    ctx := context.Background()
+    
+    // Example: Retry with custom configuration
+    attempt := 0
+    err := retry.Do(ctx, func(ctx context.Context) error {
+        attempt++
+        fmt.Printf("Attempt %d\n", attempt)
+        
+        // Simulate transient failures
+        if attempt < 3 {
+            return ErrTransient
+        }
+        
+        // Success on third attempt
+        return nil
+    },
+        retry.WithMaxAttempts(5),
+        retry.WithInitialDelay(500*time.Millisecond),
+        retry.WithMaxDelay(10*time.Second),
+        retry.WithMultiplier(2.0),
+    )
+    
+    if err != nil {
+        log.Fatalf("Operation failed: %v", err)
+    }
+    
+    fmt.Println("Operation succeeded!")
+}
+```
+
+## Error Handling
+
+### Success
+
+When `fn` returns `nil`, `Do()` returns immediately with `nil`.
+
+### Context Cancellation
+
+When the context is cancelled during a retry delay, `Do()` returns `ctx.Err()` immediately.
+
+### Exhausted Attempts
+
+After all attempts are exhausted, `Do()` returns a wrapped error:
+
+```
+after N attempts: <last error>
+```
+
+You can unwrap the original error using `errors.Unwrap()` or check with `errors.Is()`.
+
+## Best Practices
+
+1. **Use Context Timeouts**: Always provide a context with timeout to prevent infinite retries
+   ```go
+   ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+   defer cancel()
+   ```
+
+2. **Configure for Your Use Case**: Adjust retry parameters based on your needs
+   - Fast operations: shorter delays, fewer attempts
+   - External APIs: longer delays, more attempts
+   - Critical operations: more attempts with exponential backoff
+
+3. **Distinguish Error Types**: Only retry transient errors
+   ```go
+   retry.Do(ctx, func(ctx context.Context) error {
+       err := operation()
+       if isPermanentError(err) {
+           return nil // Don't retry permanent errors
+       }
+       return err
+   })
+   ```
+
+4. **Log Retry Attempts**: Add logging to track retry behavior
+   ```go
+   attempt := 0
+   retry.Do(ctx, func(ctx context.Context) error {
+       attempt++
+       err := operation()
+       if err != nil {
+           log.Printf("Attempt %d failed: %v", attempt, err)
+       }
+       return err
+   })
+   ```
+
+## Backoff Behavior
+
+The retry package uses **exponential backoff with full jitter**:
+
+- **Exponential**: Each delay grows by the multiplier factor
+- **Full Jitter**: Random value between 0 and the calculated delay
+- **Capped**: Delays never exceed `maxDelay`
+
+### Example Delays (with default settings)
+
+| Attempt | Calculation | Range | Average |
+|---------|-------------|-------|--------|
+| 1 | `2^0 * 1s` | 0-1s | 500ms |
+| 2 | `2^1 * 1s` | 0-2s | 1s |
+| 3 | `2^2 * 1s` | 0-4s | 2s |
+| 4 | `2^3 * 1s` | 0-8s | 4s |
+| 5 | `2^4 * 1s` | 0-10s (capped) | 5s |
+
+**Benefits of Full Jitter:**
+- Reduces thundering herd problem
+- Spreads load more evenly across time
+- Prevents synchronized retries from multiple clients

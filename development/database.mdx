@@ -1,0 +1,404 @@
+---
+title: Database Development
+description: Work with PostgreSQL, migrations, and type-safe SQL queries using goose and sqlc
+---
+
+The Go Template includes built-in PostgreSQL support with migrations (goose) and type-safe query generation (sqlc).
+
+## Database Stack
+
+The template uses:
+- **PostgreSQL 18** - Alpine-based container for local development
+- **goose** - Migration tool for versioning schema changes
+- **sqlc** - Generates type-safe Go code from SQL queries
+- **pgx/v5** - High-performance PostgreSQL driver and toolkit
+
+## PostgreSQL Setup
+
+### Starting the Database
+
+The PostgreSQL service is opt-in. You can use the bundled Docker container or connect to an external database.
+
+<Tabs>
+  <Tab title="Docker (Local)">
+    Start the PostgreSQL container:
+    
+    ```bash
+    make db
+    ```
+    
+    This starts PostgreSQL on `localhost:5432` with:
+    - **User:** `postgres`
+    - **Password:** `postgres`
+    - **Database:** `app`
+    
+    Stop the database:
+    
+    ```bash
+    make db-down
+    ```
+  </Tab>
+
+  <Tab title="External Database">
+    To use an external PostgreSQL instance, skip `make db` and configure the `DATABASE_URL` in your `.env` file:
+    
+    ```bash
+    DATABASE_URL=postgres://user:password@hostname:5432/dbname?sslmode=require
+    ```
+  </Tab>
+</Tabs>
+
+### Database Configuration
+
+Configure your database connection in `.env`:
+
+```bash
+# Local Docker database
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/app?sslmode=disable
+
+# External database with SSL
+DATABASE_URL=postgres://user:password@db.example.com:5432/production?sslmode=require
+```
+
+## Database Migrations
+
+The template uses [goose](https://github.com/pressly/goose) for managing database schema changes.
+
+### Migration Files
+
+Migrations are stored in `pkg/db/migrations/`. Each migration is a SQL file with up and down sections:
+
+```sql
+-- +goose Up
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- +goose Down
+DROP TABLE users;
+```
+
+### Creating Migrations
+
+<Steps>
+  <Step title="Create a new migration">
+    ```bash
+    make migrate-new
+    ```
+    
+    You'll be prompted for a migration name:
+    
+    ```
+    Migration name: create_users_table
+    ```
+  </Step>
+
+  <Step title="Edit the migration file">
+    Open the generated file in `pkg/db/migrations/` and add your SQL:
+    
+    ```sql
+    -- +goose Up
+    -- Add your schema changes here
+    
+    -- +goose Down
+    -- Add rollback logic here
+    ```
+  </Step>
+
+  <Step title="Run the migration">
+    ```bash
+    make migrate
+    ```
+    
+    This applies all pending migrations.
+  </Step>
+</Steps>
+
+### Migration Commands
+
+| Command | Description |
+|---------|-------------|
+| `make migrate` | Run all pending migrations |
+| `make migrate-down` | Roll back the last migration |
+| `make migrate-new` | Create a new migration file |
+
+<Warning>
+  Always test rollback migrations (`-- +goose Down`) to ensure they work correctly. This is critical for safe deployments.
+</Warning>
+
+## Type-Safe Queries with sqlc
+
+The template uses [sqlc](https://sqlc.dev) to generate type-safe Go code from SQL queries.
+
+### Configuration
+
+The sqlc configuration is in `pkg/db/sqlc.yaml`:
+
+```yaml
+version: "2"
+
+sql:
+  - engine: "postgresql"
+    queries: "./queries"
+    schema: "./migrations"
+    gen:
+      go:
+        package: "sqlc"
+        out: "./sqlc"
+        sql_package: "pgx/v5"
+        emit_json_tags: true
+        json_tags_case_style: camel
+        emit_interface: true
+        emit_prepared_queries: true
+```
+
+Key settings:
+- **queries**: `./queries` - SQL query files
+- **schema**: `./migrations` - Migration files (for schema awareness)
+- **out**: `./sqlc` - Generated Go code output directory
+- **sql_package**: `pgx/v5` - Uses pgx driver
+
+### Writing Queries
+
+<Steps>
+  <Step title="Create a query file">
+    Add SQL queries to `pkg/db/queries/`. For example, `users.sql`:
+    
+    ```sql
+    -- name: GetUserByEmail :one
+    SELECT id, email, created_at
+    FROM users
+    WHERE email = $1;
+    
+    -- name: CreateUser :one
+    INSERT INTO users (email)
+    VALUES ($1)
+    RETURNING id, email, created_at;
+    
+    -- name: ListUsers :many
+    SELECT id, email, created_at
+    FROM users
+    ORDER BY created_at DESC;
+    ```
+  </Step>
+
+  <Step title="Generate Go code">
+    ```bash
+    make generate
+    ```
+    
+    This runs `sqlc generate` which creates type-safe Go methods in `pkg/db/sqlc/`.
+  </Step>
+
+  <Step title="Use the generated code">
+    ```go
+    import "github.com/you/myproject/pkg/db"
+    
+    // Create database connection
+    database, err := db.New(ctx, os.Getenv("DATABASE_URL"))
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer database.Close()
+    
+    // Use generated queries
+    user, err := database.GetUserByEmail(ctx, "user@example.com")
+    if err != nil {
+        log.Fatal(err)
+    }
+    ```
+  </Step>
+</Steps>
+
+### Query Annotations
+
+sqlc uses special comments to generate code:
+
+- `:one` - Returns a single row (error if not found)
+- `:many` - Returns a slice of rows
+- `:exec` - Executes without returning rows
+- `:execrows` - Returns number of affected rows
+
+## Database Package
+
+The `pkg/db` package wraps pgxpool with additional features.
+
+### Connection Pool
+
+```go
+import "github.com/you/myproject/pkg/db"
+
+// Create a connection pool
+database, err := db.New(ctx, databaseURL)
+if err != nil {
+    return fmt.Errorf("connect to database: %w", err)
+}
+defer database.Close()
+```
+
+### Transactions
+
+The package provides two ways to work with transactions:
+
+<Tabs>
+  <Tab title="InTx (Recommended)">
+    Automatic transaction management with rollback on error:
+    
+    ```go
+    err := database.InTx(ctx, func(q sqlc.Querier) error {
+        user, err := q.CreateUser(ctx, email)
+        if err != nil {
+            return err // Automatically rolls back
+        }
+        
+        _, err = q.CreateProfile(ctx, user.ID)
+        return err // Commits if nil, rolls back on error
+    })
+    ```
+  </Tab>
+
+  <Tab title="Begin (Manual)">
+    Manual transaction control for complex cases:
+    
+    ```go
+    q, tx, err := database.Begin(ctx)
+    if err != nil {
+        return err
+    }
+    defer tx.Rollback(ctx)
+    
+    user, err := q.CreateUser(ctx, email)
+    if err != nil {
+        return err
+    }
+    
+    if err := tx.Commit(ctx); err != nil {
+        return err
+    }
+    ```
+  </Tab>
+</Tabs>
+
+### Advisory Locks
+
+For distributed coordination, the package supports PostgreSQL advisory locks:
+
+```go
+conn, err := database.AcquireConn(ctx)
+if err != nil {
+    return err
+}
+defer conn.Release()
+
+locked, err := db.TryAdvisoryLock(ctx, conn, 123456)
+if err != nil {
+    return err
+}
+if !locked {
+    return fmt.Errorf("could not acquire lock")
+}
+
+// Perform exclusive work
+// Lock is released when connection is released
+```
+
+## Null Handling
+
+The template uses [null/v9](https://github.com/aarondl/null) for nullable database fields:
+
+```go
+import "github.com/aarondl/null/v9"
+
+type User struct {
+    ID        int32
+    Email     string
+    Name      null.String // Nullable
+    Age       null.Int32  // Nullable
+    UpdatedAt null.Time   // Nullable
+}
+
+// Check if value is present
+if user.Name.IsSet() {
+    fmt.Println("Name:", user.Name.Get())
+}
+
+// Set a value
+user.Age = null.IntFrom(25)
+```
+
+## Code Generation
+
+The database package includes a go:generate directive:
+
+```go
+//go:generate sqlc generate -f sqlc.yaml
+```
+
+You can regenerate code using either:
+
+```bash
+make generate  # Runs go generate ./...
+```
+
+or
+
+```bash
+go generate ./pkg/db
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Always use transactions for multi-step operations">
+    Use `InTx` to ensure atomicity:
+    
+    ```go
+    err := database.InTx(ctx, func(q sqlc.Querier) error {
+        // All operations succeed or fail together
+        return nil
+    })
+    ```
+  </Accordion>
+
+  <Accordion title="Test both up and down migrations">
+    Ensure migrations can be rolled back:
+    
+    ```bash
+    make migrate        # Apply migration
+    make migrate-down   # Test rollback
+    make migrate        # Apply again
+    ```
+  </Accordion>
+
+  <Accordion title="Use descriptive migration names">
+    Good:
+    - `create_users_table`
+    - `add_email_index_to_users`
+    - `add_status_column_to_orders`
+    
+    Avoid:
+    - `migration1`
+    - `update`
+    - `fix`
+  </Accordion>
+
+  <Accordion title="Keep queries in separate files by domain">
+    Organize queries by feature:
+    - `queries/users.sql`
+    - `queries/orders.sql`
+    - `queries/products.sql`
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Testing" icon="flask" href="/development/testing">
+    Learn about testing database code
+  </Card>
+  <Card title="Local Setup" icon="laptop-code" href="/development/local-setup">
+    Set up your development environment
+  </Card>
+</CardGroup>

@@ -1,0 +1,489 @@
+---
+title: Testing
+description: Write and run tests for the Go Template project
+---
+
+The Go Template includes a comprehensive testing setup with race detection and best practices for unit and integration testing.
+
+## Running Tests
+
+The project uses Go's built-in testing framework with additional tooling for safety and quality.
+
+### Quick Start
+
+Run all tests with race detection:
+
+```bash
+make test
+```
+
+This executes `go test -race ./...` which:
+- Runs all tests in the project
+- Enables the race detector to catch concurrency bugs
+- Reports any data races found during test execution
+
+### Test Commands
+
+<Tabs>
+  <Tab title="Make Commands">
+    ```bash
+    # Run all tests with race detection
+    make test
+    
+    # Format code before testing
+    make format && make test
+    
+    # Lint and test
+    make lint && make test
+    ```
+  </Tab>
+
+  <Tab title="Go Commands">
+    ```bash
+    # Run all tests
+    go test ./...
+    
+    # Run with race detection
+    go test -race ./...
+    
+    # Run with verbose output
+    go test -v ./...
+    
+    # Run tests in a specific package
+    go test ./pkg/retry
+    
+    # Run a specific test
+    go test -run TestExponentialBackoff ./pkg/retry
+    
+    # Run with coverage
+    go test -cover ./...
+    
+    # Generate coverage report
+    go test -coverprofile=coverage.out ./...
+    go tool cover -html=coverage.out
+    ```
+  </Tab>
+</Tabs>
+
+## Test Structure
+
+Tests are colocated with the code they test, following Go conventions:
+
+```
+pkg/
+├── retry/
+│   ├── retry.go
+│   └── retry_test.go
+├── client/
+│   ├── client.go
+│   └── client_test.go
+└── db/
+    ├── db.go
+    └── db_test.go
+```
+
+## Writing Tests
+
+### Unit Tests
+
+Unit tests verify individual functions in isolation:
+
+```go
+package retry
+
+import (
+    "testing"
+    "time"
+)
+
+func TestExponentialBackoff(t *testing.T) {
+    tests := []struct {
+        name     string
+        attempt  int
+        base     time.Duration
+        max      time.Duration
+        wantMin  time.Duration
+        wantMax  time.Duration
+    }{
+        {
+            name:    "first attempt",
+            attempt: 0,
+            base:    100 * time.Millisecond,
+            max:     5 * time.Second,
+            wantMin: 100 * time.Millisecond,
+            wantMax: 200 * time.Millisecond,
+        },
+    }
+    
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            duration := ExponentialBackoff(tt.attempt, tt.base, tt.max)
+            if duration < tt.wantMin || duration > tt.wantMax {
+                t.Errorf("ExponentialBackoff() = %v, want between %v and %v",
+                    duration, tt.wantMin, tt.wantMax)
+            }
+        })
+    }
+}
+```
+
+### Table-Driven Tests
+
+Use table-driven tests for testing multiple scenarios:
+
+```go
+func TestValidateEmail(t *testing.T) {
+    tests := []struct {
+        name    string
+        email   string
+        wantErr bool
+    }{
+        {"valid email", "user@example.com", false},
+        {"missing @", "userexample.com", true},
+        {"missing domain", "user@", true},
+        {"empty string", "", true},
+    }
+    
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            err := ValidateEmail(tt.email)
+            if (err != nil) != tt.wantErr {
+                t.Errorf("ValidateEmail() error = %v, wantErr %v", err, tt.wantErr)
+            }
+        })
+    }
+}
+```
+
+### Integration Tests
+
+For tests that require external dependencies like databases:
+
+```go
+package db_test
+
+import (
+    "context"
+    "testing"
+    "os"
+    
+    "github.com/you/myproject/pkg/db"
+)
+
+func TestDatabaseIntegration(t *testing.T) {
+    // Skip if DATABASE_URL is not set
+    databaseURL := os.Getenv("DATABASE_URL")
+    if databaseURL == "" {
+        t.Skip("DATABASE_URL not set, skipping integration test")
+    }
+    
+    ctx := context.Background()
+    
+    // Create database connection
+    database, err := db.New(ctx, databaseURL)
+    if err != nil {
+        t.Fatalf("failed to connect: %v", err)
+    }
+    defer database.Close()
+    
+    // Run test
+    t.Run("create user", func(t *testing.T) {
+        user, err := database.CreateUser(ctx, "test@example.com")
+        if err != nil {
+            t.Fatalf("CreateUser() failed: %v", err)
+        }
+        if user.Email != "test@example.com" {
+            t.Errorf("got email %q, want %q", user.Email, "test@example.com")
+        }
+    })
+}
+```
+
+## Testing Best Practices
+
+<AccordionGroup>
+  <Accordion title="Always use the race detector">
+    The race detector catches concurrency bugs:
+    
+    ```bash
+    go test -race ./...
+    ```
+    
+    The template's `make test` command includes `-race` by default.
+  </Accordion>
+
+  <Accordion title="Use t.Helper() for test utilities">
+    Mark helper functions to improve error reporting:
+    
+    ```go
+    func assertNoError(t *testing.T, err error) {
+        t.Helper()
+        if err != nil {
+            t.Fatalf("unexpected error: %v", err)
+        }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Use subtests for organization">
+    Group related tests with `t.Run`:
+    
+    ```go
+    func TestUserService(t *testing.T) {
+        t.Run("CreateUser", func(t *testing.T) {
+            // Test user creation
+        })
+        
+        t.Run("GetUser", func(t *testing.T) {
+            // Test user retrieval
+        })
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Clean up resources">
+    Always clean up test resources:
+    
+    ```go
+    func TestWithDatabase(t *testing.T) {
+        db := setupTestDB(t)
+        defer db.Close()
+        
+        t.Cleanup(func() {
+            cleanupTestData(t, db)
+        })
+        
+        // Run tests
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Skip slow tests with short mode">
+    Use `-short` flag for quick test runs:
+    
+    ```go
+    func TestSlowOperation(t *testing.T) {
+        if testing.Short() {
+            t.Skip("skipping slow test in short mode")
+        }
+        // Run slow test
+    }
+    ```
+    
+    Run quick tests:
+    ```bash
+    go test -short ./...
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Testing Database Code
+
+When testing code that uses the database:
+
+<Steps>
+  <Step title="Use test database">
+    Create a separate test database or use transaction rollback:
+    
+    ```go
+    func TestWithTransaction(t *testing.T) {
+        db := setupTestDB(t)
+        
+        err := db.InTx(context.Background(), func(q sqlc.Querier) error {
+            // Run tests inside transaction
+            // Transaction is rolled back after test
+            return nil
+        })
+        
+        if err != nil {
+            t.Fatalf("transaction failed: %v", err)
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Use Docker for integration tests">
+    Start a test database with Docker:
+    
+    ```bash
+    # Start test database
+    docker run -d \
+      --name test-postgres \
+      -e POSTGRES_PASSWORD=test \
+      -e POSTGRES_DB=test \
+      -p 5433:5432 \
+      postgres:18-alpine
+    
+    # Run tests
+    DATABASE_URL=postgres://postgres:test@localhost:5433/test go test ./...
+    
+    # Cleanup
+    docker rm -f test-postgres
+    ```
+  </Step>
+
+  <Step title="Run migrations in tests">
+    Ensure schema is up-to-date:
+    
+    ```go
+    func setupTestDB(t *testing.T) *db.DB {
+        t.Helper()
+        
+        // Run migrations
+        cmd := exec.Command("goose", "-dir", "pkg/db/migrations",
+            "postgres", databaseURL, "up")
+        if err := cmd.Run(); err != nil {
+            t.Fatalf("migrations failed: %v", err)
+        }
+        
+        // Create connection
+        database, err := db.New(context.Background(), databaseURL)
+        if err != nil {
+            t.Fatalf("connect failed: %v", err)
+        }
+        
+        return database
+    }
+    ```
+  </Step>
+</Steps>
+
+## Testing HTTP Clients
+
+The template includes a TLS-fingerprinted HTTP client. Test it with mocking:
+
+```go
+package myservice_test
+
+import (
+    "net/http"
+    "net/http/httptest"
+    "testing"
+)
+
+func TestHTTPRequest(t *testing.T) {
+    // Create test server
+    server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        if r.URL.Path != "/api/data" {
+            t.Errorf("unexpected path: %s", r.URL.Path)
+        }
+        w.WriteHeader(http.StatusOK)
+        w.Write([]byte(`{"status":"ok"}`))
+    }))
+    defer server.Close()
+    
+    // Test your service with server.URL
+}
+```
+
+## Continuous Integration
+
+The project includes a GitHub Actions workflow for CI:
+
+```yaml
+# .github/workflows/ci.yaml
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+      - run: go test -race ./...
+```
+
+The CI badge is displayed in the README.
+
+## Code Quality Tools
+
+Beyond testing, use these tools to maintain code quality:
+
+### Linting
+
+Run static analysis:
+
+```bash
+make lint
+```
+
+This runs `go vet ./...` which checks for common mistakes.
+
+### Formatting
+
+Ensure consistent code style:
+
+```bash
+make format
+```
+
+This runs `go fmt ./...` to format all Go files.
+
+### Modernization
+
+Update code to use newer APIs:
+
+```bash
+make fix
+```
+
+This runs `go fix ./...` which rewrites code to use current Go idioms.
+
+## Coverage Reports
+
+Generate and view test coverage:
+
+<Steps>
+  <Step title="Generate coverage data">
+    ```bash
+    go test -coverprofile=coverage.out ./...
+    ```
+  </Step>
+
+  <Step title="View coverage summary">
+    ```bash
+    go tool cover -func=coverage.out
+    ```
+  </Step>
+
+  <Step title="View HTML coverage report">
+    ```bash
+    go tool cover -html=coverage.out
+    ```
+    
+    This opens an interactive HTML report in your browser.
+  </Step>
+</Steps>
+
+## Benchmarking
+
+Write benchmarks for performance-critical code:
+
+```go
+func BenchmarkExponentialBackoff(b *testing.B) {
+    for i := 0; i < b.N; i++ {
+        ExponentialBackoff(5, 100*time.Millisecond, 5*time.Second)
+    }
+}
+```
+
+Run benchmarks:
+
+```bash
+go test -bench=. ./pkg/retry
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Local Setup" icon="laptop-code" href="/development/local-setup">
+    Set up your development environment
+  </Card>
+  <Card title="Database" icon="database" href="/development/database">
+    Learn about testing with databases
+  </Card>
+</CardGroup>

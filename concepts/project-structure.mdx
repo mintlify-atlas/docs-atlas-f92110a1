@@ -1,0 +1,463 @@
+---
+title: Project Structure
+description: Understanding the directory layout and organization of the Go Template
+---
+
+The Go Template follows the [Standard Go Project Layout](https://github.com/golang-standards/project-layout) with some opinionated additions. Every directory serves a specific purpose to keep your codebase organized as it grows.
+
+## Directory Overview
+
+```
+go-template/
+├── cmd/             Application entrypoints
+├── pkg/             Reusable library code
+├── migrations/      Database schema evolution
+├── Dockerfile       Multi-stage container builds
+├── compose.yaml     Local development stack
+└── Makefile         Development commands
+```
+
+## cmd/ - Entry Points
+
+The `cmd/` directory contains executable entry points. Each subdirectory becomes a binary.
+
+### cmd/template/
+
+The main application entry point that wires together your services:
+
+```go cmd/template/main.go
+func main() {
+    ctx, stop := signal.NotifyContext(context.Background(), 
+        os.Interrupt, syscall.SIGTERM)
+    defer stop()
+
+    config, err := env.New()
+    if err != nil {
+        slog.ErrorContext(ctx, "failed to load config", "error", err)
+        os.Exit(1)
+    }
+
+    if err := run(ctx, config); err != nil {
+        // Error handling with context awareness
+        os.Exit(1)
+    }
+}
+```
+
+**Key responsibilities:**
+- Signal handling for graceful shutdown
+- Configuration loading and validation
+- Service initialization and dependency injection
+- Top-level error handling
+
+<Note>
+Rename `cmd/template/` to match your project name (e.g., `cmd/scraper/`). Update the binary name in the Makefile accordingly.
+</Note>
+
+### cmd/setup/
+
+An interactive setup wizard that runs after cloning:
+
+```bash
+make setup
+```
+
+This optional command helps you:
+- Remove unused features (PostgreSQL, Docker, etc.)
+- Clean up template files
+- Configure your development environment
+
+<Tip>
+Delete `cmd/setup/` after initial setup—it's not needed in production.
+</Tip>
+
+## pkg/ - Library Code
+
+The `pkg/` directory contains reusable packages that can be imported by your application or other projects.
+
+### pkg/template/ - Domain Logic (Replace This)
+
+This is a **skeleton service** demonstrating how to wire dependencies. Replace it with your actual business logic:
+
+```go pkg/template/template.go
+type Template struct {
+    db     *db.DB
+    client *client.Client
+}
+
+func New(db *db.DB, proxy *client.Proxy) (*Template, error) {
+    var opts []client.Option
+    if proxy != nil {
+        opts = append(opts, client.WithProxy(proxy))
+    }
+
+    c, err := client.New(opts...)
+    if err != nil {
+        return nil, err
+    }
+
+    return &Template{db: db, client: c}, nil
+}
+```
+
+**What to replace it with:**
+- Scraper logic (fetch, parse, store)
+- Bot workflows (authenticate, execute tasks)
+- Service orchestration (coordinate multiple APIs)
+
+### pkg/client/ - HTTP Client
+
+A production-ready HTTP client with advanced features:
+
+<AccordionGroup>
+  <Accordion title="TLS Fingerprinting">
+    Mimic browser TLS handshakes to avoid detection:
+    
+    ```go
+    client, err := client.New(
+        client.WithBrowser(client.BrowserChrome),
+        client.WithPlatform(client.PlatformWindows),
+    )
+    ```
+    
+    Uses `refraction-networking/utls` to replicate Chrome, Firefox, Safari, and Edge fingerprints.
+  </Accordion>
+  
+  <Accordion title="Cookie Management">
+    Automatic cookie handling with domain sharing:
+    
+    ```go
+    // Cookies are automatically stored and sent
+    resp, err := client.Do(req)
+    
+    // Manual cookie management
+    client.SetCookies(url, cookies)
+    cookies := client.GetCookies("example.com")
+    ```
+  </Accordion>
+  
+  <Accordion title="Proxy Support">
+    HTTP/HTTPS/SOCKS5 proxy with authentication:
+    
+    ```go
+    proxy := &client.Proxy{
+        Host: "proxy.example.com",
+        Port: 8080,
+        Username: "user",
+        Password: "pass",
+    }
+    
+    c, err := client.New(client.WithProxy(proxy))
+    ```
+  </Accordion>
+  
+  <Accordion title="Redirect Handling">
+    Follows redirects while preserving cookies:
+    
+    ```go
+    // Automatically follows up to 10 redirects
+    resp, err := client.Do(req)
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### pkg/db/ - Database Layer
+
+PostgreSQL integration with type-safe queries using [sqlc](https://sqlc.dev):
+
+```go pkg/db/db.go
+type DB struct {
+    pool *pgxpool.Pool
+    *sqlc.Queries
+}
+
+func New(ctx context.Context, url string) (*DB, error) {
+    pool, err := pgxpool.New(ctx, url)
+    if err != nil {
+        return nil, fmt.Errorf("create pool: %w", err)
+    }
+
+    if err := pool.Ping(ctx); err != nil {
+        return nil, fmt.Errorf("ping database: %w", err)
+    }
+
+    return &DB{
+        pool:    pool,
+        Queries: sqlc.New(pool),
+    }, nil
+}
+```
+
+**Key features:**
+- Connection pooling via `pgxpool`
+- Transaction helpers (`InTx`, `Begin`)
+- Advisory locks for distributed coordination
+- Type-safe queries generated from SQL
+
+<Steps>
+  <Step title="Write SQL Queries">
+    Add queries to `pkg/db/queries/*.sql`:
+    
+    ```sql
+    -- name: GetUser :one
+    SELECT * FROM users WHERE id = $1;
+    
+    -- name: CreateUser :one
+    INSERT INTO users (name, email) VALUES ($1, $2)
+    RETURNING *;
+    ```
+  </Step>
+  
+  <Step title="Generate Go Code">
+    Run code generation:
+    
+    ```bash
+    make generate
+    ```
+    
+    This creates type-safe Go functions in `pkg/db/sqlc/`.
+  </Step>
+  
+  <Step title="Use in Your Code">
+    ```go
+    user, err := db.GetUser(ctx, userID)
+    ```
+  </Step>
+</Steps>
+
+### pkg/env/ - Configuration
+
+Loads environment variables from `.env` files with struct-tag validation:
+
+```go pkg/env/config.go
+type Config struct {
+    DatabaseURL string `env:"DATABASE_URL,required"`
+    LogLevel    string `env:"LOG_LEVEL"`
+}
+
+func New() (*Config, error) {
+    if err := Load(); err != nil {
+        return nil, fmt.Errorf("env: load: %w", err)
+    }
+
+    var config Config
+    if err := populate(&config); err != nil {
+        return nil, err
+    }
+
+    return &config, nil
+}
+```
+
+**Features:**
+- Reads from `.env` file if present
+- Process environment variables take precedence
+- Validates required fields at startup
+- Supports quoted values and comments
+
+### pkg/log/ - Structured Logging
+
+Configures `slog` with colorized output and context injection:
+
+```go pkg/log/log.go
+func init() {
+    slog.SetDefault(slog.New(
+        &ContextHandler{
+            Handler: tint.NewHandler(colorable.NewColorable(w), &tint.Options{
+                TimeFormat: "Mon, Jan 2 2006, 3:04:05 pm MST",
+                NoColor:    !isatty.IsTerminal(w.Fd()),
+                Level:      logLevelFromEnv(),
+            }),
+        }),
+    )
+}
+```
+
+**Features:**
+- Colorized output in terminals (via `tint`)
+- Context-aware logging with request IDs
+- Configurable log levels via `LOG_LEVEL` env var
+- Automatic Windows color support
+
+### pkg/retry/ - Exponential Backoff
+
+Retry failed operations with exponential backoff and jitter:
+
+```go pkg/retry/retry.go
+err := retry.Do(ctx, func(ctx context.Context) error {
+    resp, err := client.Do(req)
+    if err != nil {
+        return err
+    }
+    if resp.StatusCode >= 500 {
+        return fmt.Errorf("server error: %d", resp.StatusCode)
+    }
+    return nil
+}, 
+    retry.WithMaxAttempts(5),
+    retry.WithInitialDelay(time.Second),
+    retry.WithMaxDelay(10*time.Second),
+)
+```
+
+**Why full jitter?**
+
+Prevents the [thundering herd problem](https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/) by randomizing backoff delays.
+
+### pkg/worker/ - Bounded Concurrency
+
+Generic worker pool built on `errgroup`:
+
+```go pkg/worker/worker.go
+items := []string{"url1", "url2", "url3"}
+
+err := worker.Run(ctx, items, 10, func(ctx context.Context, url string) error {
+    return scrapeURL(ctx, url)
+})
+```
+
+**Features:**
+- Bounded parallelism (prevents overwhelming targets)
+- Fail-fast: First error cancels remaining work
+- Generic: Works with any slice type
+- `Map` variant returns results in order
+
+### pkg/state/ - File-Based State
+
+Persist application state across restarts with file locking:
+
+```go pkg/state/state.go
+type AppState struct {
+    LastRun      time.Time
+    ProcessedIDs []string
+}
+
+stateFile, err := state.Open[AppState]("state.json")
+if err != nil {
+    return err
+}
+defer stateFile.Close()
+
+current, err := stateFile.Load()
+if current == nil {
+    current = &AppState{ProcessedIDs: []string{}}
+}
+
+current.LastRun = time.Now()
+current.ProcessedIDs = append(current.ProcessedIDs, "new-id")
+
+stateFile.Save(current)
+```
+
+**Use cases:**
+- Remember the last processed item
+- Track completion across restarts
+- Implement resumable workflows
+
+### pkg/cycle/ - Round-Robin Rotator
+
+Thread-safe round-robin rotation (useful for proxies, user agents, etc.):
+
+```go
+proxies := []string{"proxy1:8080", "proxy2:8080", "proxy3:8080"}
+rotator := cycle.New(proxies)
+
+// Each call returns the next item
+proxy := rotator.Next() // "proxy1:8080"
+proxy = rotator.Next()  // "proxy2:8080"
+```
+
+### pkg/ptr/ - Pointer Helpers
+
+Generic utilities for working with pointers:
+
+```go
+// Convert values to pointers
+name := ptr.To("John")
+count := ptr.To(42)
+
+// Dereference with fallback
+value := ptr.From(maybeNil, "default")
+```
+
+## Root Files
+
+### Dockerfile
+
+Multi-stage build with three targets:
+
+```dockerfile
+# Development: Full Go toolchain
+FROM golang:1.26 AS dev
+
+# Builder: Compiles static binary
+FROM dev AS builder
+RUN CGO_ENABLED=0 go build -o /bin/template ./cmd/template
+
+# Production: Minimal Alpine image (~15MB)
+FROM alpine:3.23 AS production
+COPY --from=builder /bin/template /bin/template
+```
+
+### compose.yaml
+
+Local development stack with hot reload:
+
+```bash
+make up     # Start app + postgres
+make watch  # Enable hot reload
+make down   # Stop all services
+```
+
+### Makefile
+
+Common development tasks:
+
+| Command | Description |
+|---------|-------------|
+| `make dev` | Run locally with `go run` |
+| `make build` | Compile binary to `bin/template` |
+| `make test` | Run tests with race detector |
+| `make generate` | Generate sqlc code |
+| `make db` | Start PostgreSQL only |
+| `make migrate` | Run database migrations |
+
+## Adding New Packages
+
+When adding functionality, follow these guidelines:
+
+<Steps>
+  <Step title="Choose the Right Location">
+    - **Domain logic**: `pkg/yourservice/`
+    - **Infrastructure**: Extend existing `pkg/` packages
+    - **New utility**: Create new `pkg/utility/`
+  </Step>
+  
+  <Step title="Write Package Documentation">
+    Every package should have a doc comment:
+    
+    ```go
+    // Package scraper fetches and parses product data from e-commerce sites.
+    package scraper
+    ```
+  </Step>
+  
+  <Step title="Keep It Focused">
+    Each package should have a single, clear responsibility. If a file exceeds 500 lines, consider splitting it.
+  </Step>
+  
+  <Step title="Export Only What's Needed">
+    Unexported functions can't be misused. Only export types and functions that clients need.
+  </Step>
+</Steps>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Configuration" href="/concepts/configuration" icon="gear">
+    Learn how to manage environment variables and settings
+  </Card>
+  <Card title="Architecture" href="/concepts/architecture" icon="sitemap">
+    Understand the design philosophy and patterns
+  </Card>
+</CardGroup>

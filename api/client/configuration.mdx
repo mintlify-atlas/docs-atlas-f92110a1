@@ -1,0 +1,425 @@
+---
+title: 'Configuration Options'
+description: 'Configure client behavior with Option functions'
+---
+
+## Overview
+
+The client package uses the functional options pattern to configure client behavior. All configuration is applied during client creation via the `New()` function.
+
+## Option Type
+
+```go
+type Option func(*Client)
+```
+
+Option is a function that configures a Client during initialization.
+
+## Browser Configuration
+
+### WithBrowser
+
+Sets the browser identity for TLS and HTTP/2 fingerprinting.
+
+```go
+func WithBrowser(b Browser) Option
+```
+
+<ParamField path="b" type="Browser">
+  Browser identity (BrowserChrome, BrowserEdge, BrowserBrave, BrowserSafari, or BrowserFirefox)
+</ParamField>
+
+**Example:**
+```go
+c, err := client.New(
+    client.WithBrowser(client.BrowserSafari),
+)
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/option.go:18`
+
+### WithBrowserVersion
+
+Sets the browser version for TLS fingerprinting.
+
+```go
+func WithBrowserVersion(v string) Option
+```
+
+<ParamField path="v" type="string">
+  Browser version in dotted notation (e.g., "131.0.0.0", "17.0")
+</ParamField>
+
+**Default:** `"131.0.0.0"`
+
+**Example:**
+```go
+c, err := client.New(
+    client.WithBrowser(client.BrowserChrome),
+    client.WithBrowserVersion("120.0.0.0"),
+)
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/option.go:23`
+
+### WithPlatform
+
+Sets the OS platform for TLS and HTTP/2 fingerprinting.
+
+```go
+func WithPlatform(p Platform) Option
+```
+
+<ParamField path="p" type="Platform">
+  OS platform (PlatformWindows, PlatformMac, PlatformLinux, PlatformIOS, or PlatformIPadOS)
+</ParamField>
+
+**Default:** `PlatformWindows`
+
+**Example:**
+```go
+c, err := client.New(
+    client.WithBrowser(client.BrowserSafari),
+    client.WithPlatform(client.PlatformMac),
+)
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/option.go:28`
+
+## Advanced Fingerprinting
+
+### WithClientHelloID
+
+Overrides the TLS ClientHelloID from the browser profile.
+
+```go
+func WithClientHelloID(id utls.ClientHelloID) Option
+```
+
+<ParamField path="id" type="utls.ClientHelloID">
+  Custom TLS ClientHello fingerprint from the utls package
+</ParamField>
+
+This option allows you to use a custom TLS fingerprint instead of the one provided by the browser profile. Useful for advanced fingerprinting scenarios.
+
+**Example:**
+```go
+import utls "github.com/refraction-networking/utls"
+
+c, err := client.New(
+    client.WithClientHelloID(utls.HelloFirefox_102),
+)
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/option.go:33`
+
+### WithH2Profile
+
+Overrides the HTTP/2 profile from the browser profile.
+
+```go
+func WithH2Profile(p H2Profile) Option
+```
+
+<ParamField path="p" type="H2Profile">
+  Custom HTTP/2 profile with SETTINGS, window size, priority, and pseudo-header order
+</ParamField>
+
+Allows complete control over HTTP/2 fingerprinting including SETTINGS frame, connection window, priority parameters, and pseudo-header ordering.
+
+**Example:**
+```go
+import "golang.org/x/net/http2"
+
+customProfile := client.H2Profile{
+    Settings: []http2.Setting{
+        {ID: http2.SettingHeaderTableSize, Val: 65536},
+        {ID: http2.SettingEnablePush, Val: 0},
+    },
+    ConnectionWindow: 15663105,
+    Priority: http2.PriorityParam{
+        Weight: 255,
+    },
+    PseudoOrder: []string{":method", ":authority", ":scheme", ":path"},
+}
+
+c, err := client.New(
+    client.WithH2Profile(customProfile),
+)
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/option.go:38`
+
+## Headers
+
+### WithDefaultHeaderOverrides
+
+Overrides browser profile default headers.
+
+```go
+func WithDefaultHeaderOverrides(h http.Header) Option
+```
+
+<ParamField path="h" type="http.Header">
+  Headers to override in the default profile. Empty values remove headers.
+</ParamField>
+
+Allows customization of default headers like User-Agent, sec-ch-ua, and other browser-specific headers. The header map is cloned internally.
+
+**Example:**
+```go
+headers := http.Header{}
+headers.Set("user-agent", "CustomBot/1.0")
+headers.Set("sec-ch-ua", "") // Remove this header
+
+c, err := client.New(
+    client.WithDefaultHeaderOverrides(headers),
+)
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/option.go:48`
+
+## Network Configuration
+
+### WithProxy
+
+Sets the proxy configuration for the client.
+
+```go
+func WithProxy(p *Proxy) Option
+```
+
+<ParamField path="p" type="*Proxy">
+  Proxy configuration with scheme, host, port, and optional credentials
+</ParamField>
+
+**Example:**
+```go
+proxy, err := client.ParseProxy("proxy.example.com:8080:user:pass", client.ProxySchemeHTTP)
+if err != nil {
+    log.Fatal(err)
+}
+
+c, err := client.New(
+    client.WithProxy(proxy),
+)
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/option.go:13`
+
+### WithDisableKeepAlives
+
+Controls whether HTTP keep-alives are disabled.
+
+```go
+func WithDisableKeepAlives(d bool) Option
+```
+
+<ParamField path="d" type="bool">
+  true to disable keep-alives, false to enable
+</ParamField>
+
+**Default:** `true` (keep-alives disabled)
+
+When disabled, each request uses a new TCP connection. When enabled, connections are reused for multiple requests.
+
+**Example:**
+```go
+// Enable keep-alives for better performance
+c, err := client.New(
+    client.WithDisableKeepAlives(false),
+)
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/option.go:53`
+
+## TLS Configuration
+
+### WithDisableSessionTickets
+
+Controls whether TLS session tickets are disabled.
+
+```go
+func WithDisableSessionTickets(d bool) Option
+```
+
+<ParamField path="d" type="bool">
+  true to disable session tickets, false to enable
+</ParamField>
+
+**Default:** `true` (session tickets disabled)
+
+TLS session tickets allow resuming TLS sessions without a full handshake. Disabling them can improve privacy.
+
+**Example:**
+```go
+// Enable session tickets for performance
+c, err := client.New(
+    client.WithDisableSessionTickets(false),
+)
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/option.go:58`
+
+### WithInsecureSkipVerify
+
+Controls whether TLS certificate verification is skipped.
+
+```go
+func WithInsecureSkipVerify(d bool) Option
+```
+
+<ParamField path="d" type="bool">
+  true to skip verification, false to verify certificates
+</ParamField>
+
+**Default:** `true` (verification skipped)
+
+**Warning:** Skipping verification makes connections vulnerable to man-in-the-middle attacks. Only use for testing or when connecting to servers with self-signed certificates.
+
+**Example:**
+```go
+// Enable certificate verification for production
+c, err := client.New(
+    client.WithInsecureSkipVerify(false),
+)
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/option.go:63`
+
+## Response Handling
+
+### WithCookieExtractor
+
+Replaces the default Set-Cookie extraction function.
+
+```go
+func WithCookieExtractor(fn CookieExtractor) Option
+```
+
+<ParamField path="fn" type="CookieExtractor">
+  Custom function to extract cookies from HTTP responses
+</ParamField>
+
+**Type:**
+```go
+type CookieExtractor func(resp *http.Response) ([]*http.Cookie, error)
+```
+
+The default extractor (`DefaultCookieExtractor`) uses relaxed parsing that allows double-quote characters in cookie values.
+
+**Example:**
+```go
+customExtractor := func(resp *http.Response) ([]*http.Cookie, error) {
+    // Custom cookie extraction logic
+    var cookies []*http.Cookie
+    for _, raw := range resp.Header.Values("Set-Cookie") {
+        cookie, err := client.ParseSetCookie(raw)
+        if err != nil {
+            continue // Skip invalid cookies
+        }
+        cookies = append(cookies, cookie)
+    }
+    return cookies, nil
+}
+
+c, err := client.New(
+    client.WithCookieExtractor(customExtractor),
+)
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/option.go:43`
+
+### WithDisableDecompression
+
+Controls whether automatic response decompression is disabled.
+
+```go
+func WithDisableDecompression(d bool) Option
+```
+
+<ParamField path="d" type="bool">
+  true to disable automatic decompression, false to enable
+</ParamField>
+
+**Default:** `false` (decompression enabled)
+
+When enabled, the client automatically decompresses responses with Content-Encoding headers (gzip, deflate, br, zstd).
+
+**Example:**
+```go
+// Disable decompression to handle it manually
+c, err := client.New(
+    client.WithDisableDecompression(true),
+)
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/option.go:68`
+
+## Default Configuration
+
+When creating a client with `client.New()` and no options, the following defaults are applied:
+
+```go
+&Client{
+    browser:               BrowserChrome,
+    browserVersion:        "131.0.0.0",
+    platform:              PlatformWindows,
+    extractCookies:        DefaultCookieExtractor,
+    disableKeepAlives:     true,
+    disableSessionTickets: true,
+    insecureSkipVerify:    true,
+    disableDecompression:  false,
+}
+```
+
+**Source:** `/home/daytona/workspace/source/pkg/client/client.go:46`
+
+## Configuration Examples
+
+### Production-Ready Client
+
+```go
+c, err := client.New(
+    client.WithBrowser(client.BrowserChrome),
+    client.WithPlatform(client.PlatformLinux),
+    client.WithInsecureSkipVerify(false),      // Verify certificates
+    client.WithDisableKeepAlives(false),       // Reuse connections
+    client.WithDisableSessionTickets(false),   // Enable session resumption
+)
+```
+
+### Safari Mobile Client
+
+```go
+c, err := client.New(
+    client.WithBrowser(client.BrowserSafari),
+    client.WithPlatform(client.PlatformIOS),
+    client.WithBrowserVersion("17.1"),
+)
+```
+
+### Proxy with Custom Headers
+
+```go
+proxy, _ := client.ParseProxy("socks5.example.com:1080", client.ProxySchemeSOCKS5)
+
+headers := http.Header{}
+headers.Set("accept-language", "en-US,en;q=0.9")
+
+c, err := client.New(
+    client.WithProxy(proxy),
+    client.WithDefaultHeaderOverrides(headers),
+)
+```
+
+### Maximum Privacy Configuration
+
+```go
+c, err := client.New(
+    client.WithBrowser(client.BrowserFirefox),
+    client.WithDisableKeepAlives(true),        // No connection reuse
+    client.WithDisableSessionTickets(true),    // No session resumption
+    client.WithInsecureSkipVerify(false),      // Verify all certificates
+)
+```

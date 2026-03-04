@@ -1,0 +1,487 @@
+---
+title: Configuration
+description: Managing environment variables, settings, and application configuration
+---
+
+The Go Template uses environment variables for all runtime configuration, with support for `.env` files during development. Configuration is loaded and validated at startup, failing fast if required values are missing.
+
+## Environment Variables
+
+All configuration is defined in the `Config` struct with struct tags:
+
+```go pkg/env/config.go
+type Config struct {
+    // [postgres]
+    DatabaseURL string `env:"DATABASE_URL,required"`
+    // [/postgres]
+}
+```
+
+### Available Variables
+
+<ParamField path="DATABASE_URL" type="string" required>
+  PostgreSQL connection string in the format:
+  
+  ```
+  postgres://user:password@host:port/database?sslmode=disable
+  ```
+  
+  **Example:**
+  ```
+  postgres://postgres:postgres@localhost:5432/app?sslmode=disable
+  ```
+  
+  <Tip>
+  Use `sslmode=require` in production to enforce encrypted connections.
+  </Tip>
+</ParamField>
+
+<ParamField path="LOG_LEVEL" type="string" default="info">
+  Controls logging verbosity. Valid values:
+  
+  - `debug` - Verbose output for development
+  - `info` - Standard operational logs
+  - `warn` - Warning messages only
+  - `error` - Error messages only
+  
+  **Example:**
+  ```bash
+  LOG_LEVEL=debug
+  ```
+</ParamField>
+
+## .env File
+
+During development, environment variables are loaded from a `.env` file in the project root:
+
+```bash .env.example
+# Log level: debug, info, warn, error
+LOG_LEVEL=debug
+
+# [postgres]
+# Postgres Database URL
+# Point this at any postgres instance (local, docker, external).
+# To start the bundled postgres: make db
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/app?sslmode=disable
+# [/postgres]
+```
+
+<Steps>
+  <Step title="Copy Example File">
+    ```bash
+    cp .env.example .env
+    ```
+  </Step>
+  
+  <Step title="Edit Values">
+    Modify `.env` with your local settings. This file is gitignored.
+  </Step>
+  
+  <Step title="Run Application">
+    The `.env` file is automatically loaded:
+    
+    ```bash
+    make dev
+    ```
+  </Step>
+</Steps>
+
+### How .env Loading Works
+
+The `pkg/env` package implements a simple `.env` parser:
+
+```go pkg/env/env.go
+func Load(path ...string) error {
+    filename := ".env"
+    if len(path) > 0 && path[0] != "" {
+        filename = path[0]
+    }
+
+    // Repeated calls are no-ops (cached)
+    mu.Lock()
+    defer mu.Unlock()
+
+    if err, ok := loaded[filename]; ok {
+        return err
+    }
+
+    err := load(filename)
+    loaded[filename] = err
+
+    return err
+}
+```
+
+**Key behaviors:**
+
+1. **Process environment takes precedence**: Existing env vars are never overwritten
+2. **Missing file is OK**: Returns `nil` if `.env` doesn't exist
+3. **Quoted values**: Strips surrounding quotes from values
+4. **Comments**: Lines starting with `#` are ignored
+5. **Thread-safe**: Uses mutex for concurrent-safe loading
+
+<Warning>
+Never commit `.env` to version control. It may contain secrets like database passwords or API keys.
+</Warning>
+
+## Adding New Configuration
+
+To add a new configuration option:
+
+<Steps>
+  <Step title="Update Config Struct">
+    Add a field with an `env` tag to `pkg/env/config.go`:
+    
+    ```go
+    type Config struct {
+        DatabaseURL string `env:"DATABASE_URL,required"`
+        LogLevel    string `env:"LOG_LEVEL"`
+        
+        // New configuration
+        APIKey      string `env:"API_KEY,required"`
+        Timeout     string `env:"REQUEST_TIMEOUT"`
+    }
+    ```
+    
+    Use `,required` to make the variable mandatory.
+  </Step>
+  
+  <Step title="Update .env.example">
+    Document the new variable:
+    
+    ```bash
+    # API key for external service
+    API_KEY=your-api-key-here
+    
+    # HTTP request timeout (default: 30s)
+    REQUEST_TIMEOUT=30s
+    ```
+  </Step>
+  
+  <Step title="Update Documentation">
+    Add the variable to this page and any relevant guides.
+  </Step>
+  
+  <Step title="Use in Application">
+    Access via the config object:
+    
+    ```go
+    config, err := env.New()
+    if err != nil {
+        return err
+    }
+    
+    client := api.New(config.APIKey)
+    ```
+  </Step>
+</Steps>
+
+### Validation Example
+
+The `populate` function validates required fields at startup:
+
+```go pkg/env/config.go
+func populate(config *Config) error {
+    v := reflect.ValueOf(config).Elem()
+    t := v.Type()
+
+    var missing []string
+
+    for i := range t.NumField() {
+        field := t.Field(i)
+        tag := field.Tag.Get("env")
+        if tag == "" {
+            continue
+        }
+
+        name, opts, _ := strings.Cut(tag, ",")
+        required := opts == "required"
+
+        val := os.Getenv(name)
+        if val == "" && required {
+            missing = append(missing, name)
+            continue
+        }
+
+        if field.Type.Kind() == reflect.String {
+            v.Field(i).SetString(val)
+        }
+    }
+
+    if len(missing) > 0 {
+        return fmt.Errorf("env: missing required variables: %s", 
+            strings.Join(missing, ", "))
+    }
+
+    return nil
+}
+```
+
+This ensures the application fails immediately if required configuration is missing, rather than failing later at runtime.
+
+## Production Configuration
+
+### Docker
+
+Pass environment variables to containers:
+
+```yaml compose.yaml
+services:
+  app:
+    image: myapp:latest
+    environment:
+      - DATABASE_URL=postgres://user:pass@db:5432/app
+      - LOG_LEVEL=info
+```
+
+Or use an env file:
+
+```yaml
+services:
+  app:
+    image: myapp:latest
+    env_file:
+      - production.env
+```
+
+### Kubernetes
+
+Use ConfigMaps for non-sensitive data:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  LOG_LEVEL: "info"
+---
+apiVersion: apps/v1
+kind: Deployment
+spec:
+  template:
+    spec:
+      containers:
+      - name: app
+        envFrom:
+        - configMapRef:
+            name: app-config
+```
+
+Use Secrets for sensitive data:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secrets
+type: Opaque
+stringData:
+  DATABASE_URL: "postgres://..."
+---
+apiVersion: apps/v1
+kind: Deployment
+spec:
+  template:
+    spec:
+      containers:
+      - name: app
+        envFrom:
+        - secretRef:
+            name: app-secrets
+```
+
+### AWS ECS
+
+Define environment variables in task definitions:
+
+```json
+{
+  "containerDefinitions": [
+    {
+      "name": "app",
+      "image": "myapp:latest",
+      "environment": [
+        {"name": "LOG_LEVEL", "value": "info"}
+      ],
+      "secrets": [
+        {
+          "name": "DATABASE_URL",
+          "valueFrom": "arn:aws:secretsmanager:region:account:secret:db-url"
+        }
+      ]
+    }
+  ]
+}
+```
+
+## Configuration Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use Defaults Wisely">
+    Only optional configuration should have defaults. Required values (like `DATABASE_URL`) should fail fast if missing.
+    
+    ```go
+    // Good: Required value, no default
+    DatabaseURL string `env:"DATABASE_URL,required"`
+    
+    // Good: Optional value with application default
+    LogLevel string `env:"LOG_LEVEL"` // Defaults to "info" in log package
+    
+    // Bad: Required value with misleading default
+    APIKey string `env:"API_KEY"` // Don't default to empty string
+    ```
+  </Accordion>
+  
+  <Accordion title="Keep Secrets Out of Code">
+    Never hardcode credentials or API keys:
+    
+    ```go
+    // Bad: Hardcoded secret
+    const apiKey = "sk-1234567890"
+    
+    // Good: From environment
+    apiKey := config.APIKey
+    ```
+    
+    Use secret management in production:
+    - AWS Secrets Manager
+    - HashiCorp Vault
+    - Kubernetes Secrets
+  </Accordion>
+  
+  <Accordion title="Validate Early">
+    Validate configuration at startup, not when first used:
+    
+    ```go
+    func New() (*Config, error) {
+        if err := Load(); err != nil {
+            return nil, fmt.Errorf("env: load: %w", err)
+        }
+
+        var config Config
+        if err := populate(&config); err != nil {
+            return nil, err // Fail fast if required vars missing
+        }
+
+        return &config, nil
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Document in .env.example">
+    Every environment variable should be documented:
+    
+    ```bash
+    # API timeout in seconds (default: 30)
+    API_TIMEOUT=30
+    
+    # Enable debug mode (true/false)
+    DEBUG=false
+    
+    # Comma-separated list of allowed origins
+    ALLOWED_ORIGINS=http://localhost:3000,https://example.com
+    ```
+  </Accordion>
+  
+  <Accordion title="Environment-Specific Files">
+    Use different env files per environment:
+    
+    ```
+    .env.development
+    .env.staging
+    .env.production
+    ```
+    
+    Load the appropriate one:
+    
+    ```go
+    env := os.Getenv("APP_ENV")
+    if env == "" {
+        env = "development"
+    }
+    
+    envFile := fmt.Sprintf(".env.%s", env)
+    if err := env.Load(envFile); err != nil {
+        return err
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Type-Safe Configuration
+
+The current implementation only supports string fields. To add type safety:
+
+```go
+type Config struct {
+    DatabaseURL    string        `env:"DATABASE_URL,required"`
+    RequestTimeout time.Duration `env:"REQUEST_TIMEOUT"`
+    MaxRetries     int           `env:"MAX_RETRIES"`
+    EnableDebug    bool          `env:"DEBUG"`
+}
+```
+
+Extend the `populate` function to handle additional types:
+
+```go
+switch field.Type.Kind() {
+case reflect.String:
+    v.Field(i).SetString(val)
+case reflect.Int:
+    n, _ := strconv.Atoi(val)
+    v.Field(i).SetInt(int64(n))
+case reflect.Bool:
+    b, _ := strconv.ParseBool(val)
+    v.Field(i).SetBool(b)
+}
+```
+
+Or use a library like [kelseyhightower/envconfig](https://github.com/kelseyhightower/envconfig) for advanced parsing.
+
+## Troubleshooting
+
+### Config Load Errors
+
+<AccordionGroup>
+  <Accordion title="Missing required variable">
+    **Error:**
+    ```
+    env: missing required variables: DATABASE_URL
+    ```
+    
+    **Solution:** Add the missing variable to your `.env` file or environment.
+  </Accordion>
+  
+  <Accordion title=".env file not found">
+    This is expected if running without a `.env` file. Set environment variables directly:
+    
+    ```bash
+    export DATABASE_URL=postgres://...
+    make dev
+    ```
+  </Accordion>
+  
+  <Accordion title="Variables not loading">
+    Check that process environment variables aren't overriding your `.env` file:
+    
+    ```bash
+    # Unset conflicting variables
+    unset DATABASE_URL
+    
+    # Or explicitly use .env values
+    env -i $(cat .env | xargs) make dev
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture" href="/concepts/architecture" icon="sitemap">
+    Understand how configuration fits into the application architecture
+  </Card>
+  <Card title="Project Structure" href="/concepts/project-structure" icon="folder-tree">
+    Learn where configuration files live in the project
+  </Card>
+</CardGroup>

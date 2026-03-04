@@ -1,0 +1,159 @@
+---
+title: Local Development Setup
+description: Set up your local development environment for the Go Template project
+---
+
+This guide walks you through setting up the Go Template project for local development.
+
+## Prerequisites
+
+Before you begin, ensure you have the following tools installed:
+
+- **Go 1.26+** - [Download Go](https://go.dev/dl/)
+- **Docker** - [Get Docker](https://docs.docker.com/get-docker/)
+- **goose** - Database migration tool
+  ```bash
+  go install github.com/pressly/goose/v3/cmd/goose@latest
+  ```
+- **sqlc** - SQL code generator
+  ```bash
+  go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+  ```
+
+## Initial Setup
+
+<Steps>
+  <Step title="Clone the project">
+    If you used `gonew` to scaffold your project, the repository is already cloned:
+    
+    ```bash
+    gonew github.com/aarock1234/go-template@latest github.com/you/myproject
+    cd myproject
+    ```
+  </Step>
+
+  <Step title="Run the setup script">
+    The interactive setup script helps you configure optional features:
+    
+    ```bash
+    make setup
+    ```
+    
+    This script will guide you through enabling or disabling features like PostgreSQL support.
+  </Step>
+
+  <Step title="Configure environment variables">
+    Copy the example environment file and customize it:
+    
+    ```bash
+    cp .env.example .env
+    ```
+    
+    Edit `.env` to configure your settings:
+    
+    ```bash
+    # Log level: debug, info, warn, error
+    LOG_LEVEL=debug
+    
+    # Postgres Database URL
+    DATABASE_URL=postgres://postgres:postgres@localhost:5432/app?sslmode=disable
+    ```
+  </Step>
+
+  <Step title="Download dependencies">
+    Install Go module dependencies:
+    
+    ```bash
+    go mod download
+    ```
+  </Step>
+</Steps>
+
+## Available Make Commands
+
+The project includes a `Makefile` with commonly used development commands:
+
+### Development Commands
+
+| Command | Description |
+|---------|-------------|
+| `make dev` | Run the application locally |
+| `make build` | Compile binary to `bin/template` |
+| `make test` | Run tests with race detector |
+| `make lint` | Static analysis via `go vet` |
+| `make fix` | Modernize code via `go fix` |
+| `make format` | Format code via `go fmt` |
+| `make generate` | Run code generation (sqlc) |
+
+### Quick Examples
+
+<CodeGroup>
+```bash Run locally
+make dev
+```
+
+```bash Build binary
+make build
+./bin/template
+```
+
+```bash Run tests
+make test
+```
+
+```bash Format and lint
+make format
+make lint
+```
+</CodeGroup>
+
+## Customizing Your Project
+
+After the initial setup, customize the template for your use case:
+
+<Steps>
+  <Step title="Replace template package">
+    The `pkg/template/` directory contains skeleton service code. Replace this with your own domain logic.
+  </Step>
+
+  <Step title="Update entrypoint">
+    Modify `cmd/template/main.go` to wire up your services and configure application startup.
+  </Step>
+
+  <Step title="Add database queries">
+    If using PostgreSQL, add SQL queries to `pkg/db/queries/` and run:
+    
+    ```bash
+    make generate
+    ```
+    
+    This generates type-safe Go code from your SQL queries using sqlc.
+  </Step>
+</Steps>
+
+## Running the Application
+
+Once setup is complete, start the application:
+
+```bash
+make dev
+```
+
+This runs the application using `go run ./cmd/template`, which:
+- Compiles and executes your code
+- Loads environment variables from `.env`
+- Starts with hot reload during development
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Docker Setup" icon="docker" href="/development/docker">
+    Run the full stack with Docker Compose
+  </Card>
+  <Card title="Database Setup" icon="database" href="/development/database">
+    Configure PostgreSQL and run migrations
+  </Card>
+  <Card title="Testing" icon="flask" href="/development/testing">
+    Write and run tests
+  </Card>
+</CardGroup>

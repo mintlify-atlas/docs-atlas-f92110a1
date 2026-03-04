@@ -1,0 +1,231 @@
+---
+title: "log"
+description: "Structured logging with colorized output and request-scoped context"
+---
+
+The `log` package initializes the default `slog` logger with [tint](https://github.com/lmittmann/tint) for colorized, structured output and injects request-scoped values from context. Simply import this package to configure the global logger.
+
+## Functions
+
+### WithIdempotencyKey
+
+```go
+func WithIdempotencyKey(ctx context.Context, key string) context.Context
+```
+
+Returns a copy of ctx carrying the given idempotency key. The key will be automatically included in all log records when using this context.
+
+<ParamField path="ctx" type="context.Context" required>
+  The parent context to derive from.
+</ParamField>
+
+<ParamField path="key" type="string" required>
+  The idempotency key to attach to the context. This will appear as `idempotency_key` in log output.
+</ParamField>
+
+**Returns:** `context.Context` - A new context with the idempotency key attached.
+
+**Example:**
+
+```go
+package main
+
+import (
+    "context"
+    "log/slog"
+    _ "github.com/aarock1234/go-template/pkg/log"
+)
+
+func handleRequest(ctx context.Context, requestID string) {
+    // Attach idempotency key to context
+    ctx = log.WithIdempotencyKey(ctx, requestID)
+
+    // All logs will now include the idempotency_key field
+    slog.InfoContext(ctx, "processing request")
+    // Output: INFO processing request idempotency_key=req-123
+
+    processOrder(ctx)
+}
+
+func processOrder(ctx context.Context) {
+    // The idempotency key propagates through the call chain
+    slog.InfoContext(ctx, "order processed successfully")
+    // Output: INFO order processed successfully idempotency_key=req-123
+}
+```
+
+## Types
+
+### ContextHandler
+
+```go
+type ContextHandler struct {
+    slog.Handler
+}
+```
+
+Wraps an `slog.Handler` to inject request-scoped values from the context into every log record. This handler is automatically configured during package initialization.
+
+**Methods:**
+
+#### Handle
+
+```go
+func (h *ContextHandler) Handle(ctx context.Context, r slog.Record) error
+```
+
+Logs a `slog.Record` with request-scoped values from the context. This method is called automatically by the slog package.
+
+<ParamField path="ctx" type="context.Context" required>
+  The context containing request-scoped values.
+</ParamField>
+
+<ParamField path="r" type="slog.Record" required>
+  The log record to handle.
+</ParamField>
+
+**Returns:** `error` - Any error from the underlying handler.
+
+## Configuration
+
+### Automatic Initialization
+
+The package automatically configures the default logger during initialization. Simply import the package:
+
+```go
+import _ "github.com/aarock1234/go-template/pkg/log"
+```
+
+### LOG_LEVEL Environment Variable
+
+Control the minimum log level with the `LOG_LEVEL` environment variable:
+
+- `debug` - Most verbose, includes all logs
+- `info` - Standard informational messages (default)
+- `warn` or `warning` - Warning messages
+- `error` - Error messages only
+
+**Example:**
+
+```bash
+# In your .env file or shell
+LOG_LEVEL=debug
+```
+
+```go
+package main
+
+import (
+    "log/slog"
+    _ "github.com/aarock1234/go-template/pkg/log"
+)
+
+func main() {
+    slog.Debug("debug message")    // Only shown if LOG_LEVEL=debug
+    slog.Info("info message")      // Shown at info and above
+    slog.Warn("warning message")   // Shown at warn and above
+    slog.Error("error message")    // Always shown unless level is higher
+}
+```
+
+### Color Output
+
+Colorized output is automatically enabled when:
+- Writing to a terminal (TTY)
+- Platform supports ANSI colors (handled by [go-colorable](https://github.com/mattn/go-colorable))
+
+Output is automatically non-colorized when:
+- Redirecting to a file
+- Running in environments without TTY support
+- CI/CD pipelines
+
+### Time Format
+
+Log timestamps use a human-readable format:
+
+```
+Mon, Jan 2 2006, 3:04:05 pm MST
+```
+
+Example output:
+```
+Tue, Mar 4 2026, 2:30:45 pm UTC INFO server started port=8080
+```
+
+## Usage Patterns
+
+### Basic Logging
+
+```go
+package main
+
+import (
+    "log/slog"
+    _ "github.com/aarock1234/go-template/pkg/log"
+)
+
+func main() {
+    slog.Info("server starting", slog.Int("port", 8080))
+    slog.Error("database connection failed", slog.String("error", "timeout"))
+}
+```
+
+### HTTP Request Logging
+
+```go
+package main
+
+import (
+    "context"
+    "log/slog"
+    "net/http"
+    "github.com/aarock1234/go-template/pkg/log"
+)
+
+func requestLogger(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        // Extract or generate request ID
+        requestID := r.Header.Get("X-Request-ID")
+        if requestID == "" {
+            requestID = generateID()
+        }
+
+        // Attach to context
+        ctx := log.WithIdempotencyKey(r.Context(), requestID)
+        r = r.WithContext(ctx)
+
+        slog.InfoContext(ctx, "request received",
+            slog.String("method", r.Method),
+            slog.String("path", r.URL.Path),
+        )
+
+        next.ServeHTTP(w, r)
+    })
+}
+```
+
+### Structured Error Logging
+
+```go
+func processPayment(ctx context.Context, amount int) error {
+    if amount <= 0 {
+        slog.ErrorContext(ctx, "invalid payment amount",
+            slog.Int("amount", amount),
+            slog.String("error", "amount must be positive"),
+        )
+        return errors.New("invalid amount")
+    }
+
+    slog.InfoContext(ctx, "payment processed",
+        slog.Int("amount", amount),
+    )
+    return nil
+}
+```
+
+## Dependencies
+
+The package uses:
+- [tint](https://github.com/lmittmann/tint) - Pretty slog handler with colors
+- [go-colorable](https://github.com/mattn/go-colorable) - Cross-platform colorized output
+- [go-isatty](https://github.com/mattn/go-isatty) - TTY detection

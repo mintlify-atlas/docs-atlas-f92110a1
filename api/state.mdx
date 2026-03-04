@@ -1,0 +1,261 @@
+---
+title: 'state'
+description: 'Generic, file-backed JSON state persistence with cross-platform file locking'
+---
+
+## Overview
+
+The `state` package provides a simple, type-safe way to persist application state to disk using JSON files. It includes cross-platform file locking to prevent concurrent access from multiple process instances.
+
+## Installation
+
+```go
+import "github.com/aarock1234/go-template/pkg/state"
+```
+
+## Types
+
+### File[T any]
+
+```go
+type File[T any] struct {
+    // contains filtered or unexported fields
+}
+```
+
+File manages a JSON file that persists state of type T across restarts. It holds an exclusive lock on the file for its entire lifetime to prevent concurrent access from multiple process instances.
+
+The type parameter `T` can be any Go type that is JSON-serializable.
+
+## Functions
+
+### Open
+
+```go
+func Open[T any](path string) (*File[T], error)
+```
+
+Open creates or opens the file at the specified path, acquires a non-blocking exclusive lock, and returns a handle for loading and saving state.
+
+<ParamField path="path" type="string" required>
+  The file system path where the state file should be stored. The file will be created if it doesn't exist.
+</ParamField>
+
+**Returns:**
+- `*File[T]` - A handle to the state file
+- `error` - An error if the file cannot be opened or locked
+
+**Behavior:**
+- If another process holds the lock, an error is returned immediately (non-blocking)
+- The file is created with permissions `0644` if it doesn't exist
+- The lock is held until `Close()` is called
+
+**Example:**
+
+```go
+type AppState struct {
+    LastRun   time.Time `json:"last_run"`
+    UserCount int       `json:"user_count"`
+}
+
+// Open or create the state file
+stateFile, err := state.Open[AppState]("./data/app.state")
+if err != nil {
+    log.Fatalf("failed to open state file: %v", err)
+}
+defer stateFile.Close()
+```
+
+## Methods
+
+### Load
+
+```go
+func (f *File[T]) Load() (*T, error)
+```
+
+Load reads and unmarshals the persisted state from disk.
+
+**Returns:**
+- `*T` - A pointer to the loaded state, or `nil` if the file is empty
+- `error` - An error if reading or unmarshaling fails
+
+**Behavior:**
+- Returns `(nil, nil)` if the file is empty (first run)
+- The file pointer is reset to the beginning before reading
+- JSON unmarshaling errors are wrapped with context
+
+**Example:**
+
+```go
+stateFile, err := state.Open[AppState]("./data/app.state")
+if err != nil {
+    log.Fatal(err)
+}
+defer stateFile.Close()
+
+// Load existing state
+appState, err := stateFile.Load()
+if err != nil {
+    log.Fatalf("failed to load state: %v", err)
+}
+
+if appState == nil {
+    // First run - initialize with defaults
+    appState = &AppState{
+        LastRun:   time.Now(),
+        UserCount: 0,
+    }
+} else {
+    fmt.Printf("Last run: %v\n", appState.LastRun)
+    appState.UserCount++
+}
+```
+
+### Save
+
+```go
+func (f *File[T]) Save(v *T) error
+```
+
+Save marshals the state to JSON, truncates the file, writes the new content, and flushes to disk.
+
+<ParamField path="v" type="*T" required>
+  A pointer to the state object to persist.
+</ParamField>
+
+**Returns:**
+- `error` - An error if marshaling, writing, or syncing fails
+
+**Behavior:**
+- The existing file content is completely replaced
+- Data is marshaled to JSON before writing
+- Changes are flushed to disk with `fsync` for durability
+- The operation is atomic from the perspective of other processes (due to the lock)
+
+**Example:**
+
+```go
+appState := &AppState{
+    LastRun:   time.Now(),
+    UserCount: 42,
+}
+
+if err := stateFile.Save(appState); err != nil {
+    log.Fatalf("failed to save state: %v", err)
+}
+```
+
+### Close
+
+```go
+func (f *File[T]) Close() error
+```
+
+Close releases the exclusive lock and closes the file.
+
+**Returns:**
+- `error` - An error if closing the file fails
+
+**Behavior:**
+- The file lock is released before closing
+- Should always be called when done with the state file (typically with `defer`)
+- After closing, the File handle cannot be used
+
+**Example:**
+
+```go
+stateFile, err := state.Open[AppState]("./data/app.state")
+if err != nil {
+    log.Fatal(err)
+}
+defer stateFile.Close() // Ensure lock is released
+
+// ... use stateFile ...
+```
+
+## Complete Example
+
+```go
+package main
+
+import (
+    "log"
+    "time"
+
+    "github.com/aarock1234/go-template/pkg/state"
+)
+
+type AppState struct {
+    StartTime time.Time `json:"start_time"`
+    RunCount  int       `json:"run_count"`
+    LastError string    `json:"last_error,omitempty"`
+}
+
+func main() {
+    // Open the state file with exclusive lock
+    stateFile, err := state.Open[AppState]("./app.state")
+    if err != nil {
+        log.Fatalf("failed to open state file: %v", err)
+    }
+    defer stateFile.Close()
+
+    // Load existing state or initialize new state
+    appState, err := stateFile.Load()
+    if err != nil {
+        log.Fatalf("failed to load state: %v", err)
+    }
+
+    if appState == nil {
+        log.Println("First run - initializing state")
+        appState = &AppState{
+            StartTime: time.Now(),
+            RunCount:  0,
+        }
+    }
+
+    // Update state
+    appState.RunCount++
+    log.Printf("Run #%d (started at %v)\n", appState.RunCount, appState.StartTime)
+
+    // Perform some work...
+    if err := doWork(); err != nil {
+        appState.LastError = err.Error()
+    } else {
+        appState.LastError = ""
+    }
+
+    // Save updated state
+    if err := stateFile.Save(appState); err != nil {
+        log.Fatalf("failed to save state: %v", err)
+    }
+}
+
+func doWork() error {
+    // Simulate some work
+    time.Sleep(100 * time.Millisecond)
+    return nil
+}
+```
+
+## Platform Support
+
+The package provides cross-platform file locking:
+
+- **Unix/Linux/macOS**: Uses `flock` system call with `LOCK_EX | LOCK_NB` flags
+- **Windows**: Uses `LockFileEx` with `LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY` flags
+
+The locking mechanism is non-blocking on all platforms, meaning `Open()` will fail immediately if another process holds the lock.
+
+## Error Handling
+
+All errors are wrapped with descriptive context using `fmt.Errorf`. Common error scenarios:
+
+- **Open fails**: File permissions issue, lock held by another process
+- **Load fails**: Corrupted JSON data, I/O error
+- **Save fails**: Disk full, JSON marshaling error, I/O error
+- **Close fails**: I/O error (rare)
+
+## Thread Safety
+
+A single `File[T]` instance is not thread-safe. If multiple goroutines need to access the state, you must coordinate access with a mutex or channel. However, the file-level lock protects against access from different processes.

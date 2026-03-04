@@ -1,0 +1,265 @@
+---
+title: 'Client Package Overview'
+description: 'HTTP client with TLS fingerprinting, HTTP/2 control, and advanced cookie handling'
+---
+
+## Overview
+
+The `client` package provides an HTTP client with TLS fingerprinting, HTTP/2 fingerprint control, custom cookie handling, and proxy support. It enables you to make HTTP requests that mimic specific browsers and platforms while maintaining fine-grained control over connection settings.
+
+## Key Capabilities
+
+- **TLS Fingerprinting**: Mimic TLS handshakes of Chrome, Edge, Brave, Safari, and Firefox
+- **HTTP/2 Fingerprinting**: Control SETTINGS frames, WINDOW_UPDATE, and pseudo-header ordering
+- **Browser Profiles**: Pre-configured profiles for multiple browsers and platforms
+- **Cookie Management**: Advanced cookie jar with support for non-standard cookie values
+- **Proxy Support**: HTTP, HTTPS, SOCKS5, and SOCKS5H proxies with authentication
+- **Header Control**: Custom header ordering and pseudo-header sequencing
+- **Automatic Decompression**: Support for gzip, deflate, brotli, and zstd
+
+## Basic Usage
+
+### Creating a Client
+
+```go
+import "github.com/your-org/pkg/client"
+
+// Create a client with default settings (Chrome on Windows)
+c, err := client.New()
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+### Making Requests
+
+```go
+req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
+if err != nil {
+    log.Fatal(err)
+}
+
+resp, err := c.Do(req)
+if err != nil {
+    log.Fatal(err)
+}
+defer resp.Body.Close()
+
+body, err := io.ReadAll(resp.Body)
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+### Customizing Browser Profile
+
+```go
+// Create a Safari client on macOS
+c, err := client.New(
+    client.WithBrowser(client.BrowserSafari),
+    client.WithPlatform(client.PlatformMac),
+    client.WithBrowserVersion("17.0"),
+)
+```
+
+### Using Proxies
+
+```go
+proxy, err := client.ParseProxy("proxy.example.com:8080:user:pass", client.ProxySchemeHTTP)
+if err != nil {
+    log.Fatal(err)
+}
+
+c, err := client.New(
+    client.WithProxy(proxy),
+)
+```
+
+## Client Type
+
+### Type Definition
+
+```go
+type Client struct {
+    // Internal fields - not directly accessible
+}
+```
+
+The `Client` type is the main entry point for making HTTP requests with advanced fingerprinting capabilities.
+
+## Core Methods
+
+### New
+
+Creates a new Client with the given options.
+
+```go
+func New(opts ...Option) (*Client, error)
+```
+
+<ParamField path="opts" type="...Option">
+  Variadic configuration options to customize the client behavior
+</ParamField>
+
+**Default Settings:**
+- Browser: Chrome
+- Version: 131.0.0.0
+- Platform: Windows
+- Keep-alives: Disabled
+- Session tickets: Disabled
+- TLS verification: Skipped
+- Decompression: Enabled
+
+**Returns:** Configured `*Client` and error if jar creation fails
+
+**Source:** `/home/daytona/workspace/source/pkg/client/client.go:45`
+
+### Do
+
+Sends an HTTP request and returns an HTTP response.
+
+```go
+func (c *Client) Do(req *http.Request) (*http.Response, error)
+```
+
+<ParamField path="req" type="*http.Request">
+  The HTTP request to send
+</ParamField>
+
+Redirects are followed manually (up to 10 redirects) so that Set-Cookie headers from intermediate responses are captured and applied to subsequent requests.
+
+**Returns:** `*http.Response` and error
+
+**Errors:**
+- `ErrTooManyRedirects`: When request exceeds 10 redirects
+- Network errors, TLS errors, or cookie extraction errors
+
+**Source:** `/home/daytona/workspace/source/pkg/client/client.go:115`
+
+### UserAgent
+
+Returns the default User-Agent header from the transport.
+
+```go
+func (c *Client) UserAgent() string
+```
+
+**Returns:** User-Agent string based on browser profile
+
+**Example Output:**
+- Chrome Windows: `"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"`
+- Safari macOS: `"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"`
+
+**Source:** `/home/daytona/workspace/source/pkg/client/client.go:366`
+
+### ClientHint
+
+Returns the default sec-ch-ua header from the transport.
+
+```go
+func (c *Client) ClientHint() string
+```
+
+**Returns:** Client hint header for Chromium-based browsers
+
+**Example Output:** `"Chromium";v="131", "Google Chrome";v="131", "Not/A)Brand";v="8"`
+
+**Source:** `/home/daytona/workspace/source/pkg/client/client.go:375`
+
+### Proxy
+
+Returns the proxy configuration used by this client.
+
+```go
+func (c *Client) Proxy() *Proxy
+```
+
+**Returns:** `*Proxy` or nil if no proxy is configured
+
+**Source:** `/home/daytona/workspace/source/pkg/client/client.go:384`
+
+## Constants
+
+### ErrTooManyRedirects
+
+```go
+var ErrTooManyRedirects = errors.New("too many redirects")
+```
+
+Returned when a request exceeds the maximum number of allowed redirects (10).
+
+**Source:** `/home/daytona/workspace/source/pkg/client/client.go:21`
+
+## Protocol Support
+
+### Supported Protocols
+
+- **HTTPS Only**: Only `https://` URLs are supported
+- **HTTP/1.1**: Automatic fallback when server doesn't support HTTP/2
+- **HTTP/2**: Preferred protocol with full fingerprint control
+- **ALPN Negotiation**: Automatic protocol selection based on TLS handshake
+
+### Redirect Handling
+
+The client automatically follows redirects with these behaviors:
+
+- **301, 302, 303**: Changes method to GET
+- **307, 308**: Preserves original method
+- **Cookie Persistence**: Cookies from redirect responses are stored and applied
+- **Maximum Redirects**: 10 (returns `ErrTooManyRedirects` if exceeded)
+
+**Source:** `/home/daytona/workspace/source/pkg/client/client.go:208`
+
+## Example: Complete Workflow
+
+```go
+package main
+
+import (
+    "fmt"
+    "io"
+    "log"
+    "net/http"
+    
+    "github.com/your-org/pkg/client"
+)
+
+func main() {
+    // Create Firefox client on Linux with proxy
+    proxy, _ := client.ParseProxy("127.0.0.1:8080", client.ProxySchemeHTTP)
+    
+    c, err := client.New(
+        client.WithBrowser(client.BrowserFirefox),
+        client.WithPlatform(client.PlatformLinux),
+        client.WithBrowserVersion("120.0"),
+        client.WithProxy(proxy),
+        client.WithInsecureSkipVerify(false), // Enable TLS verification
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // Make request
+    req, _ := http.NewRequest(http.MethodGet, "https://example.com", nil)
+    req.Header.Set("Accept", "text/html")
+    
+    resp, err := c.Do(req)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer resp.Body.Close()
+    
+    fmt.Printf("Status: %d\n", resp.StatusCode)
+    fmt.Printf("User-Agent: %s\n", c.UserAgent())
+    
+    // Access cookies
+    cookies := c.GetCookies("example.com")
+    fmt.Printf("Cookies: %d\n", len(cookies))
+}
+```
+
+## Related Documentation
+
+- [Configuration Options](/api/client/configuration) - Detailed option functions
+- [TLS Fingerprinting](/api/client/tls-fingerprinting) - Browser profiles and fingerprinting
+- [Cookie Management](/api/client/cookies) - Cookie jar operations

@@ -1,0 +1,463 @@
+---
+title: 'db'
+description: 'PostgreSQL connection pool with sqlc-generated queries, transactions, and advisory locks'
+---
+
+## Overview
+
+The `db` package wraps [pgxpool](https://github.com/jackc/pgx) with [sqlc](https://sqlc.dev)-generated type-safe queries, providing transaction helpers and advisory lock support for PostgreSQL databases.
+
+## Installation
+
+```go
+import "github.com/aarock1234/go-template/pkg/db"
+```
+
+## Types
+
+### DB
+
+```go
+type DB struct {
+    pool *pgxpool.Pool
+    *sqlc.Queries
+}
+```
+
+DB provides a PostgreSQL connection pool with query execution and transaction support. It embeds `*sqlc.Queries`, so all generated query methods are available directly on the DB instance.
+
+## Functions
+
+### New
+
+```go
+func New(ctx context.Context, url string) (*DB, error)
+```
+
+New creates a new database connection pool and pings the database to verify connectivity.
+
+<ParamField path="ctx" type="context.Context" required>
+  Context for connection establishment and ping operation.
+</ParamField>
+
+<ParamField path="url" type="string" required>
+  PostgreSQL connection URL in the format: `postgres://user:password@host:port/database?options`
+</ParamField>
+
+**Returns:**
+- `*DB` - A database connection pool with query interface
+- `error` - An error if the pool cannot be created or the ping fails
+
+**Example:**
+
+```go
+ctx := context.Background()
+dbURL := "postgres://user:password@localhost:5432/myapp?sslmode=disable"
+
+db, err := db.New(ctx, dbURL)
+if err != nil {
+    log.Fatalf("failed to connect to database: %v", err)
+}
+defer db.Close()
+```
+
+### TryAdvisoryLock
+
+```go
+func TryAdvisoryLock(ctx context.Context, conn *pgxpool.Conn, key int64) (bool, error)
+```
+
+TryAdvisoryLock attempts to acquire a session-level PostgreSQL advisory lock on the given connection. Advisory locks are application-level locks managed by PostgreSQL.
+
+<ParamField path="ctx" type="context.Context" required>
+  Context for the lock acquisition query.
+</ParamField>
+
+<ParamField path="conn" type="*pgxpool.Conn" required>
+  A dedicated connection from the pool. Must be acquired with `AcquireConn()`.
+</ParamField>
+
+<ParamField path="key" type="int64" required>
+  The lock identifier. Multiple processes trying to acquire the same key will compete for the lock.
+</ParamField>
+
+**Returns:**
+- `bool` - `true` if the lock was acquired, `false` if another session holds it
+- `error` - An error if the query fails
+
+**Behavior:**
+- Uses PostgreSQL's `pg_try_advisory_lock()` function
+- Lock is held until the connection is released or explicitly unlocked
+- Non-blocking: returns immediately with success/failure status
+- Lock is automatically released when the connection is closed
+
+**Example:**
+
+```go
+ctx := context.Background()
+
+// Acquire a dedicated connection
+conn, err := db.AcquireConn(ctx)
+if err != nil {
+    log.Fatal(err)
+}
+defer conn.Release()
+
+// Try to acquire an advisory lock
+lockKey := int64(12345)
+locked, err := db.TryAdvisoryLock(ctx, conn, lockKey)
+if err != nil {
+    log.Fatalf("failed to acquire lock: %v", err)
+}
+
+if !locked {
+    log.Println("Another process holds the lock")
+    return
+}
+
+log.Println("Lock acquired, performing exclusive operation...")
+// The lock is automatically released when conn.Release() is called
+```
+
+## Methods
+
+### Close
+
+```go
+func (d *DB) Close()
+```
+
+Close shuts down the connection pool and releases all resources.
+
+**Behavior:**
+- Closes all idle connections in the pool
+- Waits for active connections to be released
+- Should be called when the application shuts down
+
+**Example:**
+
+```go
+db, err := db.New(ctx, dbURL)
+if err != nil {
+    log.Fatal(err)
+}
+defer db.Close()
+```
+
+### AcquireConn
+
+```go
+func (d *DB) AcquireConn(ctx context.Context) (*pgxpool.Conn, error)
+```
+
+AcquireConn returns a dedicated connection from the pool. The caller must call `Release()` on the returned connection when done.
+
+<ParamField path="ctx" type="context.Context" required>
+  Context for the connection acquisition.
+</ParamField>
+
+**Returns:**
+- `*pgxpool.Conn` - A dedicated database connection
+- `error` - An error if a connection cannot be acquired
+
+**Use Cases:**
+- Session-level operations like advisory locks
+- Operations that require connection state (e.g., prepared statements)
+- Long-running operations that need a dedicated connection
+
+**Example:**
+
+```go
+conn, err := db.AcquireConn(ctx)
+if err != nil {
+    return fmt.Errorf("acquire connection: %w", err)
+}
+defer conn.Release()
+
+// Use the dedicated connection
+locked, err := db.TryAdvisoryLock(ctx, conn, 12345)
+// ...
+```
+
+### Begin
+
+```go
+func (d *DB) Begin(ctx context.Context) (sqlc.Querier, pgx.Tx, error)
+```
+
+Begin starts a database transaction and returns a Querier bound to it along with the underlying `pgx.Tx`. The caller is responsible for calling `Commit()` or `Rollback()` on the transaction.
+
+<ParamField path="ctx" type="context.Context" required>
+  Context for the transaction.
+</ParamField>
+
+**Returns:**
+- `sqlc.Querier` - A query interface bound to the transaction
+- `pgx.Tx` - The underlying transaction handle
+- `error` - An error if the transaction cannot be started
+
+**When to Use:**
+- Use `Begin()` when the transaction must span multiple call sites
+- Use `Begin()` when the transaction cannot be expressed as a single callback
+- For the common case, prefer `InTx()` which handles commit/rollback automatically
+
+**Example:**
+
+```go
+q, tx, err := db.Begin(ctx)
+if err != nil {
+    return fmt.Errorf("begin transaction: %w", err)
+}
+defer tx.Rollback(ctx) // Rollback if not committed
+
+// Use the Querier for database operations
+if err := q.CreateUser(ctx, ...); err != nil {
+    return err // Transaction will be rolled back
+}
+
+if err := q.CreateProfile(ctx, ...); err != nil {
+    return err // Transaction will be rolled back
+}
+
+// Commit the transaction
+if err := tx.Commit(ctx); err != nil {
+    return fmt.Errorf("commit transaction: %w", err)
+}
+```
+
+### InTx
+
+```go
+func (d *DB) InTx(ctx context.Context, fn func(sqlc.Querier) error) error
+```
+
+InTx executes a function inside a database transaction. The transaction is automatically rolled back if the function returns an error or panics. On success, the transaction is committed.
+
+<ParamField path="ctx" type="context.Context" required>
+  Context for the transaction.
+</ParamField>
+
+<ParamField path="fn" type="func(sqlc.Querier) error" required>
+  A callback function that performs database operations using the provided Querier. Return an error to roll back the transaction.
+</ParamField>
+
+**Returns:**
+- `error` - An error from the callback function or from commit/rollback
+
+**Behavior:**
+- Automatically begins a transaction
+- Calls the provided function with a transaction-bound Querier
+- Commits if the function returns `nil`
+- Rolls back if the function returns an error
+- Rolls back if the function panics (then re-panics)
+
+**Example:**
+
+```go
+err := db.InTx(ctx, func(q sqlc.Querier) error {
+    // All operations use the same transaction
+    user, err := q.CreateUser(ctx, sqlc.CreateUserParams{
+        Email: "user@example.com",
+        Name:  "John Doe",
+    })
+    if err != nil {
+        return fmt.Errorf("create user: %w", err)
+    }
+
+    err = q.CreateProfile(ctx, sqlc.CreateProfileParams{
+        UserID: user.ID,
+        Bio:    "Hello world",
+    })
+    if err != nil {
+        return fmt.Errorf("create profile: %w", err)
+    }
+
+    // Transaction will be committed automatically
+    return nil
+})
+
+if err != nil {
+    log.Fatalf("transaction failed: %v", err)
+}
+```
+
+## SQLC Integration
+
+### Querier Interface
+
+```go
+type Querier interface {
+    Example(ctx context.Context) (int32, error)
+    // ... other generated methods
+}
+```
+
+The `Querier` interface is generated by sqlc and contains all your database query methods. The DB struct embeds `*sqlc.Queries`, so you can call query methods directly:
+
+```go
+// Direct query execution on the pool
+result, err := db.Example(ctx)
+
+// Query execution within a transaction
+err := db.InTx(ctx, func(q sqlc.Querier) error {
+    result, err := q.Example(ctx)
+    // ...
+    return nil
+})
+```
+
+### Queries Struct
+
+```go
+type Queries struct {
+    // contains filtered or unexported fields
+}
+
+func (q *Queries) WithTx(tx pgx.Tx) *Queries
+```
+
+The `Queries` struct is generated by sqlc and provides methods for executing your SQL queries. It's embedded in the `DB` struct.
+
+## Complete Example
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+    "time"
+
+    "github.com/aarock1234/go-template/pkg/db"
+    "github.com/aarock1234/go-template/pkg/db/sqlc"
+)
+
+func main() {
+    ctx := context.Background()
+
+    // Connect to database
+    dbURL := "postgres://user:password@localhost:5432/myapp"
+    database, err := db.New(ctx, dbURL)
+    if err != nil {
+        log.Fatalf("failed to connect: %v", err)
+    }
+    defer database.Close()
+
+    // Simple query execution
+    result, err := database.Example(ctx)
+    if err != nil {
+        log.Fatalf("query failed: %v", err)
+    }
+    log.Printf("Result: %d", result)
+
+    // Transaction example
+    err = database.InTx(ctx, func(q sqlc.Querier) error {
+        // All queries in this function share the same transaction
+        _, err := q.Example(ctx)
+        return err
+    })
+    if err != nil {
+        log.Fatalf("transaction failed: %v", err)
+    }
+
+    // Advisory lock example
+    conn, err := database.AcquireConn(ctx)
+    if err != nil {
+        log.Fatalf("failed to acquire connection: %v", err)
+    }
+    defer conn.Release()
+
+    lockKey := int64(12345)
+    locked, err := db.TryAdvisoryLock(ctx, conn, lockKey)
+    if err != nil {
+        log.Fatalf("failed to acquire lock: %v", err)
+    }
+
+    if locked {
+        log.Println("Lock acquired, performing exclusive work...")
+        time.Sleep(5 * time.Second)
+        log.Println("Work complete, releasing lock")
+    } else {
+        log.Println("Could not acquire lock")
+    }
+}
+```
+
+## Advisory Locks Pattern
+
+Advisory locks are useful for distributed coordination:
+
+```go
+func performExclusiveTask(ctx context.Context, db *db.DB) error {
+    // Acquire a dedicated connection
+    conn, err := db.AcquireConn(ctx)
+    if err != nil {
+        return err
+    }
+    defer conn.Release()
+
+    // Try to acquire the lock
+    const taskLockKey = 999
+    locked, err := db.TryAdvisoryLock(ctx, conn, taskLockKey)
+    if err != nil {
+        return err
+    }
+
+    if !locked {
+        return fmt.Errorf("another instance is running this task")
+    }
+
+    // Lock is held - perform the exclusive task
+    log.Println("Performing exclusive task...")
+    time.Sleep(10 * time.Second)
+
+    // Lock is automatically released when conn.Release() is called
+    return nil
+}
+```
+
+## Transaction Patterns
+
+### Pattern 1: Simple Transaction (Recommended)
+
+```go
+err := db.InTx(ctx, func(q sqlc.Querier) error {
+    // All operations here are atomic
+    if err := q.Operation1(ctx, ...); err != nil {
+        return err // Automatic rollback
+    }
+    if err := q.Operation2(ctx, ...); err != nil {
+        return err // Automatic rollback
+    }
+    return nil // Automatic commit
+})
+```
+
+### Pattern 2: Manual Transaction Control
+
+```go
+q, tx, err := db.Begin(ctx)
+if err != nil {
+    return err
+}
+defer tx.Rollback(ctx) // Safe to call after Commit
+
+if err := q.Operation1(ctx, ...); err != nil {
+    return err
+}
+
+if err := q.Operation2(ctx, ...); err != nil {
+    return err
+}
+
+return tx.Commit(ctx)
+```
+
+## Error Handling
+
+All errors are wrapped with context using `fmt.Errorf`. Common error scenarios:
+
+- **New fails**: Invalid connection URL, network issue, authentication failure
+- **InTx/Begin fails**: Connection pool exhausted, context canceled
+- **Query failures**: SQL errors, constraint violations, type conversion errors
+- **TryAdvisoryLock fails**: Query error (not the same as failing to acquire)

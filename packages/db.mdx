@@ -1,0 +1,627 @@
+---
+title: 'Database'
+description: 'PostgreSQL connection pool with sqlc-generated queries and transaction helpers'
+---
+
+The `db` package wraps [pgxpool](https://pkg.go.dev/github.com/jackc/pgx/v5/pgxpool) with [sqlc](https://sqlc.dev)-generated type-safe queries, transaction helpers, and advisory lock support.
+
+## Installation
+
+```go
+import "github.com/aarock1234/go-template/pkg/db"
+```
+
+## Quick Start
+
+Connect to a database and execute queries:
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+    
+    "github.com/aarock1234/go-template/pkg/db"
+)
+
+func main() {
+    ctx := context.Background()
+    
+    // Connect to database
+    database, err := db.New(ctx, "postgres://user:pass@localhost:5432/dbname?sslmode=disable")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer database.Close()
+    
+    // Use sqlc-generated queries
+    // database.Queries methods available here
+}
+```
+
+## Core Type
+
+### DB
+
+Provides a connection pool with query execution and transaction support.
+
+```go
+type DB struct {
+    *sqlc.Queries
+    // private fields
+}
+```
+
+The DB struct embeds `*sqlc.Queries`, giving you direct access to all sqlc-generated query methods.
+
+## Functions
+
+### New
+
+Creates a new database connection pool and verifies connectivity.
+
+```go
+func New(ctx context.Context, url string) (*DB, error)
+```
+
+<ParamField path="ctx" type="context.Context">
+  Context for connection establishment and ping
+</ParamField>
+
+<ParamField path="url" type="string">
+  PostgreSQL connection string
+</ParamField>
+
+**Connection String Format:**
+```
+postgres://username:password@host:port/database?options
+```
+
+**Common Options:**
+- `sslmode=disable` - Disable SSL
+- `sslmode=require` - Require SSL
+- `pool_max_conns=10` - Maximum pool connections
+- `pool_min_conns=2` - Minimum pool connections
+
+**Example:**
+
+```go
+db, err := db.New(ctx, "postgres://app:secret@db.example.com:5432/production?sslmode=require")
+if err != nil {
+    return fmt.Errorf("connecting to database: %w", err)
+}
+defer db.Close()
+```
+
+### Close
+
+Shuts down the connection pool.
+
+```go
+func (d *DB) Close()
+```
+
+Always call `Close()` when done, typically with `defer`:
+
+```go
+db, err := db.New(ctx, dbURL)
+if err != nil {
+    return err
+}
+defer db.Close()
+```
+
+## Transaction Management
+
+### InTx
+
+Executes a function inside a database transaction with automatic rollback on error.
+
+```go
+func (d *DB) InTx(ctx context.Context, fn func(sqlc.Querier) error) error
+```
+
+<ParamField path="ctx" type="context.Context">
+  Context for the transaction
+</ParamField>
+
+<ParamField path="fn" type="func(sqlc.Querier) error">
+  Function to execute inside the transaction. Return error to rollback.
+</ParamField>
+
+**Behavior:**
+- Automatically commits on success
+- Automatically rolls back on error or panic
+- Uses the sqlc.Querier interface for type-safe queries
+
+**Example:**
+
+```go
+err := db.InTx(ctx, func(q sqlc.Querier) error {
+    // All queries in this function are part of the transaction
+    user, err := q.CreateUser(ctx, db.CreateUserParams{
+        Name:  "alice",
+        Email: "alice@example.com",
+    })
+    if err != nil {
+        return err // Triggers rollback
+    }
+    
+    err = q.UpdateUserStatus(ctx, db.UpdateUserStatusParams{
+        ID:     user.ID,
+        Status: "active",
+    })
+    if err != nil {
+        return err // Triggers rollback
+    }
+    
+    return nil // Triggers commit
+})
+```
+
+### Begin
+
+Starts a transaction manually (for advanced use cases).
+
+```go
+func (d *DB) Begin(ctx context.Context) (sqlc.Querier, pgx.Tx, error)
+```
+
+<ParamField path="ctx" type="context.Context">
+  Context for the transaction
+</ParamField>
+
+**Returns:**
+- `sqlc.Querier` - Query interface bound to the transaction
+- `pgx.Tx` - Transaction handle for manual commit/rollback
+- `error` - Error if transaction cannot be started
+
+<Warning>
+  Prefer `InTx` for most cases. Only use `Begin` when the transaction must span multiple function calls or cannot be expressed as a single callback.
+</Warning>
+
+**Example:**
+
+```go
+q, tx, err := db.Begin(ctx)
+if err != nil {
+    return err
+}
+defer tx.Rollback(ctx) // Always rollback; no-op after Commit
+
+user, err := q.CreateUser(ctx, params)
+if err != nil {
+    return err // Rollback happens via defer
+}
+
+// Do more work...
+
+return tx.Commit(ctx)
+```
+
+## Connection Management
+
+### AcquireConn
+
+Returns a dedicated connection from the pool.
+
+```go
+func (d *DB) AcquireConn(ctx context.Context) (*pgxpool.Conn, error)
+```
+
+<ParamField path="ctx" type="context.Context">
+  Context for acquiring the connection
+</ParamField>
+
+**Usage:** Useful for session-level operations like advisory locks. The caller **must** call `Release()` on the returned connection when done.
+
+**Example:**
+
+```go
+conn, err := db.AcquireConn(ctx)
+if err != nil {
+    return err
+}
+defer conn.Release()
+
+// Use connection for session-level operations
+locked, err := db.TryAdvisoryLock(ctx, conn, 12345)
+```
+
+## Advisory Locks
+
+### TryAdvisoryLock
+
+Attempts to acquire a PostgreSQL advisory lock.
+
+```go
+func TryAdvisoryLock(ctx context.Context, conn *pgxpool.Conn, key int64) (bool, error)
+```
+
+<ParamField path="ctx" type="context.Context">
+  Context for the lock operation
+</ParamField>
+
+<ParamField path="conn" type="*pgxpool.Conn">
+  Dedicated connection from AcquireConn
+</ParamField>
+
+<ParamField path="key" type="int64">
+  Lock identifier (application-defined)
+</ParamField>
+
+**Returns:**
+- `(true, nil)` if lock was acquired
+- `(false, nil)` if lock is held by another session
+- `(false, error)` on error
+
+**Note:** The lock is held for the lifetime of the connection. Release the connection to release the lock.
+
+**Example:**
+
+```go
+conn, err := db.AcquireConn(ctx)
+if err != nil {
+    return err
+}
+defer conn.Release() // Releases lock
+
+locked, err := db.TryAdvisoryLock(ctx, conn, 12345)
+if err != nil {
+    return err
+}
+
+if !locked {
+    return fmt.Errorf("resource is locked by another process")
+}
+
+// Perform exclusive operation
+doExclusiveWork()
+```
+
+## sqlc Integration
+
+The package is designed to work with [sqlc](https://sqlc.dev) for type-safe SQL queries.
+
+### Setup
+
+1. **Define queries in SQL:**
+
+```sql pkg/db/queries/users.sql
+-- name: GetUser :one
+SELECT id, name, email, created_at
+FROM users
+WHERE id = $1;
+
+-- name: CreateUser :one
+INSERT INTO users (name, email)
+VALUES ($1, $2)
+RETURNING id, name, email, created_at;
+
+-- name: ListUsers :many
+SELECT id, name, email, created_at
+FROM users
+ORDER BY created_at DESC;
+```
+
+2. **Configure sqlc:**
+
+```yaml pkg/db/sqlc.yaml
+version: "2"
+sql:
+  - schema: "schema.sql"
+    queries: "queries/"
+    engine: "postgresql"
+    gen:
+      go:
+        package: "sqlc"
+        out: "sqlc"
+```
+
+3. **Generate code:**
+
+```bash
+cd pkg/db
+sqlc generate
+```
+
+4. **Use generated queries:**
+
+```go
+db, err := db.New(ctx, dbURL)
+if err != nil {
+    return err
+}
+defer db.Close()
+
+// Use generated methods directly
+user, err := db.GetUser(ctx, userID)
+if err != nil {
+    return err
+}
+
+fmt.Printf("User: %s (%s)\n", user.Name, user.Email)
+```
+
+## Usage Examples
+
+### Basic CRUD Operations
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    
+    "github.com/aarock1234/go-template/pkg/db"
+    "github.com/aarock1234/go-template/pkg/db/sqlc"
+)
+
+func main() {
+    ctx := context.Background()
+    
+    database, err := db.New(ctx, "postgres://user:pass@localhost/mydb")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer database.Close()
+    
+    // Create
+    user, err := database.CreateUser(ctx, sqlc.CreateUserParams{
+        Name:  "Alice",
+        Email: "alice@example.com",
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // Read
+    user, err = database.GetUser(ctx, user.ID)
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // Update
+    err = database.UpdateUser(ctx, sqlc.UpdateUserParams{
+        ID:    user.ID,
+        Name:  "Alice Smith",
+        Email: user.Email,
+    })
+    
+    // Delete
+    err = database.DeleteUser(ctx, user.ID)
+}
+```
+
+### Transaction Example
+
+```go
+func transferFunds(ctx context.Context, db *db.DB, fromID, toID int64, amount int) error {
+    return db.InTx(ctx, func(q sqlc.Querier) error {
+        // Debit from account
+        err := q.UpdateBalance(ctx, sqlc.UpdateBalanceParams{
+            ID:     fromID,
+            Amount: -amount,
+        })
+        if err != nil {
+            return fmt.Errorf("debit failed: %w", err)
+        }
+        
+        // Credit to account
+        err = q.UpdateBalance(ctx, sqlc.UpdateBalanceParams{
+            ID:     toID,
+            Amount: amount,
+        })
+        if err != nil {
+            return fmt.Errorf("credit failed: %w", err)
+        }
+        
+        // Log transaction
+        _, err = q.CreateTransaction(ctx, sqlc.CreateTransactionParams{
+            FromID: fromID,
+            ToID:   toID,
+            Amount: amount,
+        })
+        if err != nil {
+            return fmt.Errorf("logging failed: %w", err)
+        }
+        
+        return nil // Commits transaction
+    })
+}
+```
+
+### Advisory Lock Example
+
+```go
+func processWithLock(ctx context.Context, db *db.DB, resourceID int64) error {
+    conn, err := db.AcquireConn(ctx)
+    if err != nil {
+        return err
+    }
+    defer conn.Release()
+    
+    // Try to acquire lock
+    locked, err := db.TryAdvisoryLock(ctx, conn, resourceID)
+    if err != nil {
+        return fmt.Errorf("lock error: %w", err)
+    }
+    
+    if !locked {
+        return fmt.Errorf("resource %d is being processed by another worker", resourceID)
+    }
+    
+    // Process exclusively
+    return processResource(ctx, db, resourceID)
+}
+```
+
+### Batch Operations
+
+```go
+func createUsers(ctx context.Context, db *db.DB, names []string) error {
+    return db.InTx(ctx, func(q sqlc.Querier) error {
+        for _, name := range names {
+            _, err := q.CreateUser(ctx, sqlc.CreateUserParams{
+                Name:  name,
+                Email: fmt.Sprintf("%s@example.com", name),
+            })
+            if err != nil {
+                return err // Rolls back entire batch
+            }
+        }
+        return nil
+    })
+}
+```
+
+### Context Timeout
+
+```go
+import "time"
+
+func queryWithTimeout(db *db.DB) error {
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+    
+    users, err := db.ListUsers(ctx)
+    if err != nil {
+        if errors.Is(err, context.DeadlineExceeded) {
+            return fmt.Errorf("query timed out")
+        }
+        return err
+    }
+    
+    // Process users...
+    return nil
+}
+```
+
+## Connection Pool Configuration
+
+Configure the connection pool via URL parameters:
+
+```go
+url := "postgres://user:pass@localhost/db?" +
+    "pool_max_conns=20" +           // Max connections
+    "&pool_min_conns=5" +           // Min connections
+    "&pool_max_conn_lifetime=1h" +  // Max connection lifetime
+    "&pool_max_conn_idle_time=30m" + // Max idle time
+    "&pool_health_check_period=1m"  // Health check interval
+
+db, err := db.New(ctx, url)
+```
+
+## Error Handling
+
+```go
+import (
+    "errors"
+    "github.com/jackc/pgx/v5"
+)
+
+user, err := db.GetUser(ctx, userID)
+if err != nil {
+    if errors.Is(err, pgx.ErrNoRows) {
+        return fmt.Errorf("user not found")
+    }
+    return fmt.Errorf("query failed: %w", err)
+}
+```
+
+## Best Practices
+
+<Tip>
+  **Use InTx for transactions:** It handles commit/rollback automatically and is safer than manual transaction management.
+</Tip>
+
+<Tip>
+  **Always pass context:** Use context for timeouts and cancellation. Pass it to all query methods.
+</Tip>
+
+<Warning>
+  **Release acquired connections:** Always call `Release()` on connections from `AcquireConn()`, typically with `defer`.
+</Warning>
+
+<Tip>
+  **Use advisory locks for distributed coordination:** Perfect for ensuring only one worker processes a resource at a time.
+</Tip>
+
+<Tip>
+  **Configure connection pool:** Tune pool settings based on your workload. Start with defaults and adjust if needed.
+</Tip>
+
+## Complete Example
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "time"
+    
+    "github.com/aarock1234/go-template/pkg/db"
+    "github.com/aarock1234/go-template/pkg/db/sqlc"
+)
+
+func main() {
+    ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+    defer cancel()
+    
+    // Connect with pool configuration
+    dbURL := "postgres://app:secret@localhost:5432/production?" +
+        "sslmode=require&pool_max_conns=20"
+    
+    database, err := db.New(ctx, dbURL)
+    if err != nil {
+        log.Fatalf("Failed to connect: %v", err)
+    }
+    defer database.Close()
+    
+    log.Println("Connected to database")
+    
+    // Create user in transaction
+    err = database.InTx(ctx, func(q sqlc.Querier) error {
+        user, err := q.CreateUser(ctx, sqlc.CreateUserParams{
+            Name:  "Alice",
+            Email: "alice@example.com",
+        })
+        if err != nil {
+            return fmt.Errorf("creating user: %w", err)
+        }
+        
+        log.Printf("Created user: %d - %s", user.ID, user.Name)
+        
+        // Create profile in same transaction
+        _, err = q.CreateProfile(ctx, sqlc.CreateProfileParams{
+            UserID: user.ID,
+            Bio:    "Software Engineer",
+        })
+        if err != nil {
+            return fmt.Errorf("creating profile: %w", err)
+        }
+        
+        return nil
+    })
+    
+    if err != nil {
+        log.Fatalf("Transaction failed: %v", err)
+    }
+    
+    // Query users
+    users, err := database.ListUsers(ctx)
+    if err != nil {
+        log.Fatalf("Listing users: %v", err)
+    }
+    
+    fmt.Printf("Total users: %d\n", len(users))
+    for _, user := range users {
+        fmt.Printf("  - %s (%s)\n", user.Name, user.Email)
+    }
+}
+```

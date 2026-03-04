@@ -1,0 +1,393 @@
+---
+title: Setup Guide
+description: Understand and customize your project with the interactive setup wizard
+---
+
+## Overview
+
+The setup wizard is an interactive command-line tool that configures your freshly scaffolded project by removing infrastructure and packages you don't need. It runs once after you clone the template, leaving you with a clean, tailored codebase.
+
+```bash
+make setup
+```
+
+<Note>
+  The setup wizard is destructive—it deletes files and code. Run it immediately after scaffolding your project, before making any changes.
+</Note>
+
+## How It Works
+
+The wizard uses comment markers in source files to identify removable sections:
+
+```makefile
+# [docker]
+up: ## Start full stack with docker compose
+	docker compose up --build
+# [/docker]
+```
+
+When you deselect Docker support, everything between `# [docker]` and `# [/docker]` is automatically removed.
+
+## Configuration Steps
+
+The wizard walks you through four configuration screens:
+
+<Steps>
+  <Step title="Docker Support">
+    **Includes:** `Dockerfile`, `compose.yaml`, `.dockerignore`, and Docker-related Makefile targets
+
+    ```
+    Include Docker?
+    Multi-stage Dockerfile, compose for dev, hot reload
+
+    [x] Yes
+    [ ] No
+    ```
+
+    Choose **Yes** if:
+    - You want containerized deployments
+    - You need Docker Compose for development
+    - You want hot reload with `docker compose watch`
+
+    Choose **No** if:
+    - You're deploying directly to VMs or serverless
+    - You prefer local development without containers
+  </Step>
+
+  <Step title="PostgreSQL Support">
+    **Includes:** `pkg/db/` directory, sqlc queries, goose migrations, database Makefile targets
+
+    ```
+    Include PostgreSQL?
+    pgx pool, sqlc queries, goose migrations
+
+    [x] Yes
+    [ ] No
+    ```
+
+    Choose **Yes** if:
+    - Your application needs persistent storage
+    - You want type-safe database queries
+    - You need relational data management
+
+    Choose **No** if:
+    - Your app is stateless
+    - You're using a different database (MongoDB, Redis, etc.)
+    - You don't need persistence
+
+    <Warning>
+      Removing PostgreSQL support deletes the entire `pkg/db/` directory and all migration files.
+    </Warning>
+  </Step>
+
+  <Step title="PostgreSQL Hosting (conditional)">
+    This screen only appears if you selected **both** Docker and PostgreSQL:
+
+    ```
+    PostgreSQL hosting
+
+    [x] Docker
+    [ ] External
+    ```
+
+    - **Docker**: Includes a postgres service in `compose.yaml` and `make db` command
+    - **External**: Removes Docker postgres; you'll provide your own database URL
+  </Step>
+
+  <Step title="Optional Packages">
+    Select which utility packages to include. All are pre-selected by default:
+
+    ```
+    Packages to include
+    Pre-selected. Deselect any you don't need.
+
+    [x] HTTP Client: TLS fingerprint, proxy, cookies, HTTP/2
+    [x] Worker Pool: bounded concurrency via errgroup
+    [x] Retry: exponential backoff with jitter
+    [x] State: file-backed JSON with file locking
+    [x] Cycle: thread-safe round-robin rotator
+    [x] Fake Data: fake data generation helpers
+    ```
+
+    ### Package Details
+
+    <AccordionGroup>
+      <Accordion title="HTTP Client" icon="globe">
+        **Location:** `pkg/client/`
+
+        Advanced HTTP client with:
+        - TLS fingerprinting to mimic real browsers (Chrome, Firefox, Safari)
+        - HTTP/2 fingerprint control
+        - Proxy support (HTTP, SOCKS5)
+        - Cookie jar with domain-based management
+        - Automatic decompression
+
+        ```go
+        client, err := client.New(
+            client.WithBrowser(client.BrowserChrome),
+            client.WithProxy("http://proxy.example.com:8080"),
+        )
+        ```
+
+        Keep this if you're building scrapers or need to bypass bot detection.
+      </Accordion>
+
+      <Accordion title="Worker Pool" icon="users">
+        **Location:** `pkg/worker/`
+
+        Bounded concurrency primitives for parallel processing:
+
+        ```go
+        // Process items with max 10 concurrent workers
+        err := worker.Run(ctx, urls, 10, func(ctx context.Context, url string) error {
+            return processURL(url)
+        })
+
+        // Map with results in input order
+        results, err := worker.Map(ctx, items, 5, func(ctx context.Context, item Item) (Result, error) {
+            return transform(item)
+        })
+        ```
+
+        Keep this for concurrent job processing, scraping, or API calls.
+      </Accordion>
+
+      <Accordion title="Retry" icon="rotate">
+        **Location:** `pkg/retry/`
+
+        Exponential backoff with full jitter for transient errors:
+
+        ```go
+        err := retry.Do(ctx, func(ctx context.Context) error {
+            return makeAPICall()
+        },
+            retry.WithMaxAttempts(5),
+            retry.WithInitialDelay(1*time.Second),
+            retry.WithMaxDelay(30*time.Second),
+        )
+        ```
+
+        Keep this for network operations, API calls, or database connections.
+      </Accordion>
+
+      <Accordion title="State" icon="save">
+        **Location:** `pkg/state/`
+
+        File-backed JSON persistence with cross-platform file locking:
+
+        ```go
+        type AppState struct {
+            LastProcessedID int       `json:"last_processed_id"`
+            StartedAt       time.Time `json:"started_at"`
+        }
+
+        // Open and lock state file
+        stateFile, err := state.Open[AppState]("state.json")
+        if err != nil {
+            return err
+        }
+        defer stateFile.Close()
+
+        // Load existing state
+        st, err := stateFile.Load()
+        if err != nil {
+            return err
+        }
+        if st == nil {
+            st = &AppState{StartedAt: time.Now()}
+        }
+
+        // Update and save
+        st.LastProcessedID = 1234
+        err = stateFile.Save(st)
+        ```
+
+        Keep this for resumable scrapers, progress tracking, or single-instance enforcement.
+      </Accordion>
+
+      <Accordion title="Cycle" icon="arrows-rotate">
+        **Location:** `pkg/cycle/`
+
+        Thread-safe round-robin rotator for files:
+
+        ```go
+        // Rotate through proxy list
+        proxies, err := cycle.New("proxies.txt")
+        if err != nil {
+            return err
+        }
+
+        proxy := proxies.Next() // Thread-safe rotation
+        ```
+
+        Keep this for proxy rotation, account switching, or load distribution.
+      </Accordion>
+
+      <Accordion title="Fake Data" icon="database">
+        **Location:** `pkg/fake/`
+
+        Helpers for generating realistic test data.
+
+        Keep this for testing, seeding databases, or development fixtures.
+      </Accordion>
+    </AccordionGroup>
+  </Step>
+
+  <Step title="Confirmation">
+    Final confirmation before applying changes:
+
+    ```
+    Apply changes?
+
+    [x] Apply
+    [ ] Cancel
+    ```
+
+    Select **Apply** to proceed, or **Cancel** to abort without making changes.
+  </Step>
+</Steps>
+
+## What Gets Removed
+
+The setup wizard cleans up your project by:
+
+1. **Deleting entire directories** for deselected packages
+2. **Removing tagged sections** from files (Makefile, .env.example, etc.)
+3. **Cleaning up compose.yaml** by removing unused services
+4. **Removing itself** (`cmd/setup/` directory) after completion
+5. **Running `go mod tidy`** to remove unused dependencies
+
+<CodeGroup>
+```go cmd/setup/main.go
+// The setup wizard removes disabled features and cleans up the project
+func apply(s setup) {
+    if !s.docker {
+        warn(removeFeature(dockerRemoval))
+    }
+
+    if !s.postgres {
+        warn(removeFeature(postgresRemoval))
+    } else if !s.docker || s.pgHosting == hostingExternal {
+        warn(removeFeature(postgresExternalRemoval))
+    }
+
+    for i, p := range optionalPackages {
+        if !slices.Contains(s.packages, i) {
+            warn(removeFeature(p.feature))
+        }
+    }
+
+    warn(removeSelf())
+    warn(tidyModules())
+
+    fmt.Println("\nsetup complete")
+}
+```
+</CodeGroup>
+
+## Re-running Setup
+
+<Warning>
+  The setup wizard deletes itself after running successfully. You cannot re-run it unless you restore `cmd/setup/` from the template.
+</Warning>
+
+If you need to adjust your configuration after setup:
+
+1. **Add packages:** Copy the package directory from the original template
+2. **Remove packages:** Delete the package directory and run `go mod tidy`
+3. **Change Docker/PostgreSQL:** Manually edit or restore relevant files
+
+## Advanced Customization
+
+Before running the setup wizard, you can customize the removal logic:
+
+### Adding Custom Tags
+
+Define new tags in `cmd/setup/feature.go`:
+
+```go
+const (
+    tagDocker   tag = "docker"
+    tagPostgres tag = "postgres"
+    tagMyFeature tag = "my-feature"  // Your custom tag
+)
+```
+
+Then use the tag in your files:
+
+```go
+// [my-feature]
+func optionalFunction() {
+    // This will be removed if my-feature is deselected
+}
+// [/my-feature]
+```
+
+### Custom Removal Rules
+
+Add your feature to the `optionalPackages` slice:
+
+```go
+var optionalPackages = []optionalPkg{
+    {
+        label: "My Custom Package: description here",
+        feature: feature{
+            dirs: []string{"pkg/mypackage"},
+            files: []string{"docs/mypackage.md"},
+            sections: []section{
+                {file: "Makefile", tag: tagMyFeature},
+            },
+        },
+    },
+}
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Setup wizard not found">
+    Make sure you're in the project root directory and haven't run setup yet:
+
+    ```bash
+    ls cmd/setup/main.go
+    ```
+
+    If missing, the wizard has already run and deleted itself.
+  </Accordion>
+
+  <Accordion title="Import errors after setup">
+    Run `go mod tidy` to clean up dependencies:
+
+    ```bash
+    go mod tidy
+    ```
+
+    The setup wizard does this automatically, but manual changes may require it again.
+  </Accordion>
+
+  <Accordion title="Need to restore removed packages">
+    Copy the package directory from the original template:
+
+    ```bash
+    # Clone the template to a temp directory
+    git clone https://github.com/aarock1234/go-template.git /tmp/go-template
+
+    # Copy the package you need
+    cp -r /tmp/go-template/pkg/retry ./pkg/
+
+    # Update dependencies
+    go mod tidy
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Development Workflow" icon="code" href="/development">
+    Learn about available make commands and development practices
+  </Card>
+  <Card title="Project Structure" icon="folder" href="/structure">
+    Understand the organization of your configured project
+  </Card>
+</CardGroup>

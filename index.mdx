@@ -1,97 +1,313 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: Go Template Documentation
+mode: custom
 ---
 
-## Setting up
+<div className="relative bg-gradient-to-br from-[#0f1117] via-[#1a1d27] to-[#0f1117] dark:from-[#0f1117] dark:via-[#1a1d27] dark:to-[#0f1117] bg-white py-20">
+  <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImdyaWQiIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTSAxMCAwIEwgMCAwIDAgMTAiIGZpbGw9Im5vbmUiIHN0cm9rZT0icmdiYSgyNTUsMjU1LDI1NSwwLjAzKSIgc3Ryb2tlLXdpZHRoPSIxIi8+PC9wYXR0ZXJuPjwvZGVmcz48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSJ1cmwoI2dyaWQpIi8+PC9zdmc+')] dark:opacity-100 opacity-0"></div>
+  
+  <div className="relative max-w-6xl mx-auto px-6 lg:px-8">
+    <div className="flex flex-col lg:flex-row lg:grid lg:grid-cols-12 gap-12 items-center">
+      <div className="lg:col-span-7 space-y-8">
+        <div className="inline-flex items-center px-4 py-2 rounded-full bg-[#94cb04]/10 dark:bg-[#94cb04]/10 border border-[#94cb04]/20 dark:border-[#94cb04]/20">
+          <span className="text-[#94cb04] dark:text-[#94cb04] text-sm font-semibold">Batteries-included Go template</span>
+        </div>
+        
+        <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-gray-900 dark:text-white leading-tight">
+          Build Go services <span className="text-[#94cb04] dark:text-[#94cb04]">faster</span>
+        </h1>
+        
+        <p className="text-lg sm:text-xl text-gray-600 dark:text-gray-300 max-w-2xl leading-relaxed">
+          An opinionated Go project template for scrapers, bots, and service workloads. Get TLS-fingerprinted HTTP clients, exponential backoff, bounded concurrency, PostgreSQL, and structured logging out of the box.
+        </p>
+        
+        <div className="flex flex-wrap gap-4">
+          <a 
+            href="/quickstart" 
+            className="inline-flex items-center px-6 py-3 rounded-lg bg-[#94cb04] hover:bg-[#7dad03] text-white font-semibold transition-colors shadow-lg shadow-[#94cb04]/20"
+          >
+            Get started
+            <svg className="ml-2 w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+            </svg>
+          </a>
+          
+          <a 
+            href="/introduction" 
+            className="inline-flex items-center px-6 py-3 rounded-lg border border-gray-300 dark:border-[#27272a] bg-white/5 dark:bg-white/5 hover:bg-white/10 dark:hover:bg-white/10 text-gray-900 dark:text-white font-semibold transition-colors"
+          >
+            View documentation
+          </a>
+        </div>
+        
+        <div className="pt-4">
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">Clone with gonew:</p>
+          <div className="bg-[#1a1d27] dark:bg-[#1a1d27] rounded-lg p-4 font-mono text-sm text-gray-300 dark:text-gray-300 border border-[#27272a] dark:border-[#27272a]">
+            gonew github.com/aarock1234/go-template@latest github.com/you/myproject
+          </div>
+        </div>
+      </div>
+      
+      <div className="lg:col-span-5 hidden lg:block">
+        <div className="relative">
+          <div className="absolute inset-0 bg-[#94cb04]/20 dark:bg-[#94cb04]/20 blur-3xl rounded-full"></div>
+          <div className="relative bg-[#1a1d27] dark:bg-[#1a1d27] rounded-2xl p-6 border border-[#27272a] dark:border-[#27272a] shadow-2xl">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="w-3 h-3 rounded-full bg-red-500"></div>
+              <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
+              <div className="w-3 h-3 rounded-full bg-green-500"></div>
+            </div>
+            <pre className="text-sm text-gray-300 dark:text-gray-300 overflow-x-auto">
+{`// Create HTTP client with TLS fingerprinting
+client, err := client.New(
+  client.WithBrowser(client.BrowserChrome),
+  client.WithProxy(proxyURL),
+)
 
-Get your documentation site up and running in minutes.
+// Retry with exponential backoff
+err := retry.Do(ctx, func(ctx context.Context) error {
+  resp, err := client.Do(req)
+  return err
+}, retry.WithMaxAttempts(5))
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
+// Bounded concurrency
+worker.Run(ctx, items, 10, func(ctx context.Context, item Task) error {
+  return processItem(item)
+})`}
+            </pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
-## Make it yours
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="text-center mb-12">
+    <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Get started in minutes</h2>
+    <p className="text-lg text-gray-600 dark:text-gray-400">Clone the template, run setup, and start building your service</p>
+  </div>
+  
+  <Steps>
+    <Step title="Install gonew">
+      First, install the `gonew` tool from the Go team:
+      
+      ```bash
+      go install golang.org/x/tools/cmd/gonew@latest
+      ```
+    </Step>
+    
+    <Step title="Clone the template">
+      Use `gonew` to scaffold your project. This clones the template and rewrites all import paths to your module name:
+      
+      ```bash
+      gonew github.com/aarock1234/go-template@latest github.com/you/myproject
+      cd myproject
+      ```
+    </Step>
+    
+    <Step title="Run the setup wizard">
+      Configure optional features interactively. Choose which components you need:
+      
+      ```bash
+      make setup
+      ```
+      
+      The wizard lets you opt in or out of Docker, PostgreSQL, and individual packages. All features are pre-selected by default.
+    </Step>
+    
+    <Step title="Configure your environment">
+      Copy the example environment file and set your configuration:
+      
+      ```bash
+      cp .env.example .env
+      # Edit .env with your DATABASE_URL and other settings
+      ```
+    </Step>
+    
+    <Step title="Start building">
+      Run your application locally:
+      
+      ```bash
+      make dev
+      ```
+      
+      Or with Docker:
+      
+      ```bash
+      make up
+      ```
+      
+      Replace `pkg/template` with your own domain logic and update `cmd/template/main.go` to wire your services together.
+    </Step>
+  </Steps>
+</div>
 
-Design a docs site that looks great and empowers your users.
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="text-center mb-12">
+    <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Explore by topic</h2>
+    <p className="text-lg text-gray-600 dark:text-gray-400">Jump into the area you need to learn about</p>
+  </div>
+  
+  <CardGroup cols={3}>
+    <Card title="HTTP Client" icon="globe" href="/packages/client">
+      TLS-fingerprinted HTTP clients with custom headers, cookies, and proxy support
+    </Card>
+    
+    <Card title="Retry Logic" icon="rotate" href="/packages/retry">
+      Exponential backoff with full jitter for transient-error recovery
+    </Card>
+    
+    <Card title="Concurrency" icon="arrows-split-up-and-left" href="/packages/worker">
+      Bounded-concurrency primitives for parallel processing with errgroup
+    </Card>
+    
+    <Card title="State Management" icon="floppy-disk" href="/packages/state">
+      File-backed JSON persistence with cross-platform locking
+    </Card>
+    
+    <Card title="Database" icon="database" href="/packages/db">
+      PostgreSQL integration with pgx, sqlc queries, and transactions
+    </Card>
+    
+    <Card title="Configuration" icon="gear" href="/packages/env">
+      Environment variable loading with struct-tag validation
+    </Card>
+    
+    <Card title="Logging" icon="list" href="/packages/log">
+      Structured logging with slog and tint for beautiful output
+    </Card>
+    
+    <Card title="File Rotation" icon="arrows-rotate" href="/packages/cycle">
+      Thread-safe round-robin file rotation utilities
+    </Card>
+    
+    <Card title="Utilities" icon="toolbox" href="/packages/ptr">
+      Generic pointer helpers and other Go conveniences
+    </Card>
+  </CardGroup>
+</div>
 
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
-  </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
-  </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
-  </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
-  </Card>
-</Columns>
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="text-center mb-12">
+    <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Key features</h2>
+    <p className="text-lg text-gray-600 dark:text-gray-400">Everything you need to build production-ready Go services</p>
+  </div>
+  
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div className="bg-white dark:bg-[#1a1d27] rounded-lg p-6 border border-gray-200 dark:border-[#27272a]">
+      <div className="flex items-start gap-4">
+        <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-[#94cb04]/10 dark:bg-[#94cb04]/10 flex items-center justify-center">
+          <svg className="w-6 h-6 text-[#94cb04] dark:text-[#94cb04]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+          </svg>
+        </div>
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">TLS Fingerprinting</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400">Mimic real browser TLS/HTTP2 fingerprints including Chrome, Firefox, Safari, and Edge on Windows, macOS, and Android</p>
+        </div>
+      </div>
+    </div>
+    
+    <div className="bg-white dark:bg-[#1a1d27] rounded-lg p-6 border border-gray-200 dark:border-[#27272a]">
+      <div className="flex items-start gap-4">
+        <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-[#94cb04]/10 dark:bg-[#94cb04]/10 flex items-center justify-center">
+          <svg className="w-6 h-6 text-[#94cb04] dark:text-[#94cb04]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+        </div>
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Smart Retries</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400">Exponential backoff with full jitter, configurable max attempts, delays, and multipliers for resilient error handling</p>
+        </div>
+      </div>
+    </div>
+    
+    <div className="bg-white dark:bg-[#1a1d27] rounded-lg p-6 border border-gray-200 dark:border-[#27272a]">
+      <div className="flex items-start gap-4">
+        <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-[#94cb04]/10 dark:bg-[#94cb04]/10 flex items-center justify-center">
+          <svg className="w-6 h-6 text-[#94cb04] dark:text-[#94cb04]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+        </div>
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Controlled Concurrency</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400">Process items in parallel with bounded worker pools, automatic context cancellation, and result collection</p>
+        </div>
+      </div>
+    </div>
+    
+    <div className="bg-white dark:bg-[#1a1d27] rounded-lg p-6 border border-gray-200 dark:border-[#27272a]">
+      <div className="flex items-start gap-4">
+        <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-[#94cb04]/10 dark:bg-[#94cb04]/10 flex items-center justify-center">
+          <svg className="w-6 h-6 text-[#94cb04] dark:text-[#94cb04]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
+          </svg>
+        </div>
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Production PostgreSQL</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400">Connection pooling with pgx, type-safe sqlc queries, transaction helpers, and advisory lock support</p>
+        </div>
+      </div>
+    </div>
+    
+    <div className="bg-white dark:bg-[#1a1d27] rounded-lg p-6 border border-gray-200 dark:border-[#27272a]">
+      <div className="flex items-start gap-4">
+        <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-[#94cb04]/10 dark:bg-[#94cb04]/10 flex items-center justify-center">
+          <svg className="w-6 h-6 text-[#94cb04] dark:text-[#94cb04]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+        </div>
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Stateful Persistence</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400">File-backed JSON state with exclusive locking to prevent concurrent access across multiple process instances</p>
+        </div>
+      </div>
+    </div>
+    
+    <div className="bg-white dark:bg-[#1a1d27] rounded-lg p-6 border border-gray-200 dark:border-[#27272a]">
+      <div className="flex items-start gap-4">
+        <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-[#94cb04]/10 dark:bg-[#94cb04]/10 flex items-center justify-center">
+          <svg className="w-6 h-6 text-[#94cb04] dark:text-[#94cb04]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+          </svg>
+        </div>
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Beautiful Logs</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400">Structured logging with slog and tint, context injection, and colorized output for development</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
-## Create beautiful pages
-
-Everything you need to create world-class documentation.
-
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
-
-## Need inspiration?
-
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="bg-gradient-to-br from-[#94cb04]/10 to-[#94cb04]/5 dark:from-[#94cb04]/10 dark:to-[#94cb04]/5 rounded-2xl p-8 md:p-12 border border-[#94cb04]/20 dark:border-[#94cb04]/20 text-center">
+    <h2 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-4">
+      Ready to build your next Go service?
+    </h2>
+    <p className="text-lg text-gray-600 dark:text-gray-400 mb-8 max-w-2xl mx-auto">
+      Clone the template with gonew and get production-ready infrastructure in minutes
+    </p>
+    <div className="flex flex-wrap justify-center gap-4">
+      <a 
+        href="/quickstart" 
+        className="inline-flex items-center px-6 py-3 rounded-lg bg-[#94cb04] hover:bg-[#7dad03] text-white font-semibold transition-colors shadow-lg"
+      >
+        Get started now
+        <svg className="ml-2 w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+        </svg>
+      </a>
+      <a 
+        href="https://github.com/aarock1234/go-template" 
+        className="inline-flex items-center px-6 py-3 rounded-lg border border-gray-300 dark:border-[#27272a] bg-white dark:bg-[#1a1d27] hover:bg-gray-50 dark:hover:bg-[#242838] text-gray-900 dark:text-white font-semibold transition-colors"
+      >
+        <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 24 24">
+          <path fillRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" clipRule="evenodd" />
+        </svg>
+        View on GitHub
+      </a>
+    </div>
+  </div>
+</div>

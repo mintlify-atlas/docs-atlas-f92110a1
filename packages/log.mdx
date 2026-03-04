@@ -1,0 +1,282 @@
+---
+title: "log"
+description: "Logging package with slog and tint for colorized, structured output"
+---
+
+The `log` package initializes the default `slog` logger with [tint](https://github.com/lmittmann/tint) for colorized, structured output and provides utilities to inject request-scoped values from context.
+
+## Installation
+
+```go
+import "github.com/aarock1234/go-template/pkg/log"
+```
+
+Simply importing the package is enough to configure the logger:
+
+```go
+import (
+    "log/slog"
+    _ "github.com/aarock1234/go-template/pkg/log" // Initialize logger
+)
+```
+
+## Features
+
+- **Colorized output**: Automatically detects TTY and enables colors
+- **Structured logging**: Built on Go's standard `log/slog`
+- **Context injection**: Add request-scoped values to all log records
+- **Configurable log level**: Set via `LOG_LEVEL` environment variable
+- **Human-readable timestamps**: Formatted as "Mon, Jan 2 2006, 3:04:05 pm MST"
+
+## Quick Start
+
+```go
+package main
+
+import (
+    "context"
+    "log/slog"
+    "github.com/aarock1234/go-template/pkg/log"
+)
+
+func main() {
+    // Basic logging
+    slog.Info("server started", slog.Int("port", 8080))
+    slog.Debug("debug information", slog.String("module", "main"))
+    slog.Warn("warning message")
+    slog.Error("error occurred", slog.String("error", "connection failed"))
+    
+    // Context-aware logging
+    ctx := log.WithIdempotencyKey(context.Background(), "req-123")
+    slog.InfoContext(ctx, "processing request") // Includes idempotency_key
+}
+```
+
+## Functions
+
+### WithIdempotencyKey
+
+Returns a copy of the context carrying the given idempotency key.
+
+```go pkg/log/log.go:21
+func WithIdempotencyKey(ctx context.Context, key string) context.Context
+```
+
+<ParamField path="ctx" type="context.Context" required>
+  The parent context
+</ParamField>
+
+<ParamField path="key" type="string" required>
+  The idempotency key to inject into log records
+</ParamField>
+
+**Example:**
+
+```go
+func handleRequest(w http.ResponseWriter, r *http.Request) {
+    // Extract idempotency key from header
+    key := r.Header.Get("Idempotency-Key")
+    ctx := log.WithIdempotencyKey(r.Context(), key)
+    
+    // All logs in this context will include the idempotency key
+    slog.InfoContext(ctx, "processing request")
+    // Output: ... msg="processing request" idempotency_key=req-123
+    
+    processPayment(ctx)
+}
+
+func processPayment(ctx context.Context) {
+    slog.InfoContext(ctx, "payment processed")
+    // Output: ... msg="payment processed" idempotency_key=req-123
+}
+```
+
+## Types
+
+### ContextHandler
+
+Wraps an `slog.Handler` to inject request-scoped values from the context into every log record.
+
+```go pkg/log/log.go:27
+type ContextHandler struct {
+    slog.Handler
+}
+```
+
+**Methods:**
+
+```go pkg/log/log.go:32
+func (h *ContextHandler) Handle(ctx context.Context, r slog.Record) error
+```
+
+Logs a `slog.Record` with request-scoped values extracted from the context. Currently supports:
+- `idempotency_key` - Injected when context contains an idempotency key
+
+## Configuration
+
+### Log Level
+
+Set the log level using the `LOG_LEVEL` environment variable:
+
+```bash
+# .env
+LOG_LEVEL=debug
+```
+
+**Supported values:**
+- `debug` - Show all logs including debug messages
+- `info` (default) - Show info, warn, and error logs
+- `warn` or `warning` - Show only warnings and errors
+- `error` - Show only errors
+
+**Example:**
+
+```bash
+# Development
+LOG_LEVEL=debug
+
+# Production
+LOG_LEVEL=info
+```
+
+### Color Output
+
+Colors are automatically enabled when:
+- Writing to a TTY (terminal)
+- Using Windows: Colors work via `go-colorable`
+
+Colors are disabled when:
+- Output is redirected to a file
+- Running in a non-TTY environment (e.g., CI/CD)
+
+## Log Format
+
+Logs are formatted with tint's colorized, structured output:
+
+```
+Mon, Jan 2 2006, 3:04:05 pm MST INF server started port=8080
+Mon, Jan 2 2006, 3:04:06 pm MST DBG debug message module=main
+Mon, Jan 2 2006, 3:04:07 pm MST WRN warning message
+Mon, Jan 2 2006, 3:04:08 pm MST ERR error occurred error="connection failed"
+```
+
+**With context values:**
+
+```
+Mon, Jan 2 2006, 3:04:09 pm MST INF processing request idempotency_key=req-123
+```
+
+## Usage Examples
+
+### Basic Structured Logging
+
+```go
+import "log/slog"
+
+// Simple message
+slog.Info("application started")
+
+// With attributes
+slog.Info("user logged in",
+    slog.String("user_id", "123"),
+    slog.String("ip", "192.168.1.1"),
+)
+
+// Grouped attributes
+slog.Info("request completed",
+    slog.Group("request",
+        slog.String("method", "POST"),
+        slog.String("path", "/api/users"),
+    ),
+    slog.Int("status", 201),
+)
+```
+
+### HTTP Middleware
+
+```go
+func LoggingMiddleware(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        // Add idempotency key to context
+        ctx := r.Context()
+        if key := r.Header.Get("Idempotency-Key"); key != "" {
+            ctx = log.WithIdempotencyKey(ctx, key)
+        }
+        
+        // Log the request
+        slog.InfoContext(ctx, "incoming request",
+            slog.String("method", r.Method),
+            slog.String("path", r.URL.Path),
+        )
+        
+        next.ServeHTTP(w, r.WithContext(ctx))
+    })
+}
+```
+
+### Error Logging
+
+```go
+func processData(ctx context.Context) error {
+    data, err := fetchData()
+    if err != nil {
+        slog.ErrorContext(ctx, "failed to fetch data",
+            slog.String("error", err.Error()),
+        )
+        return err
+    }
+    
+    slog.InfoContext(ctx, "data processed", slog.Int("records", len(data)))
+    return nil
+}
+```
+
+### Creating a Logger with Additional Context
+
+```go
+// Create a logger with persistent attributes
+logger := slog.With(
+    slog.String("service", "payment-processor"),
+    slog.String("version", "1.0.0"),
+)
+
+// All logs from this logger include the attributes
+logger.Info("service started") // Includes service=payment-processor version=1.0.0
+logger.Error("payment failed", slog.String("error", "insufficient funds"))
+```
+
+## Dependencies
+
+The package uses:
+- [`log/slog`](https://pkg.go.dev/log/slog) - Go's standard structured logging
+- [`github.com/lmittmann/tint`](https://github.com/lmittmann/tint) - Colorized slog handler
+- [`github.com/mattn/go-colorable`](https://github.com/mattn/go-colorable) - Cross-platform color support
+- [`github.com/mattn/go-isatty`](https://github.com/mattn/go-isatty) - TTY detection
+
+## Best Practices
+
+1. **Use structured logging**: Prefer key-value attributes over string formatting
+
+```go
+// Good
+slog.Info("user created", slog.String("user_id", id))
+
+// Avoid
+slog.Info(fmt.Sprintf("user %s created", id))
+```
+
+2. **Use context-aware logging**: Pass context through your application
+
+```go
+func HandleRequest(ctx context.Context) {
+    slog.InfoContext(ctx, "processing") // Includes context values
+}
+```
+
+3. **Set appropriate log levels**: Use debug for development, info for production
+
+4. **Add persistent context**: Create loggers with common attributes
+
+```go
+logger := slog.With(slog.String("module", "database"))
+```
